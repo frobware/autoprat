@@ -47,7 +47,7 @@ You are tired of:
 
 **autoprat** includes a built-in list mode that makes it easy to explore PRs before taking action. Use the `--list` option to see what PRs are available and which ones need attention.
 
-### Basic listing
+### Basic listing with autoprat
 
 List all open PRs in a repository:
 
@@ -64,8 +64,20 @@ autoprat -r openshift/bpfman-operator --list 488
 Example output:
 ```
 #489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
-#488 - app/red-hat-konflux - chore(deps): update ocp-bpfman-agent to 0527d3b
-#487 - app/red-hat-konflux - fix(deps): update github.com/openshift/api digest to b7d0ca2
+  State:   OPEN | Created: 2025-05-12
+  URL:     https://github.com/openshift/bpfman-operator/pull/489
+  Status:
+    - Approved: ✗
+    - CI: ✗ Failing
+    - LGTM: ✗
+    - OK-to-test: ✓
+  Labels:
+    - konflux-nudge
+    - needs-ok-to-test
+  Checks:
+    - Red Hat Konflux / bpfman-operator-bundle-on-pull-request: SUCCESS
+    - Red Hat Konflux / bpfman-operator-enterprise-contract / ocp-bpfman-operator-bundle: FAILURE
+    - tide: PENDING
 ```
 
 ### Finding PRs that need attention
@@ -81,25 +93,6 @@ autoprat -r openshift/bpfman-operator --list --needs-lgtm
 
 # Find PRs needing both
 autoprat -r openshift/bpfman-operator --list --needs-approve --needs-lgtm
-```
-
-### Viewing PR details
-
-When listing PRs, you'll see complete information including labels and CI status:
-
-```bash
-autoprat -r openshift/bpfman-operator --list
-```
-
-Example output:
-```
-#489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
-  State:   OPEN | Created: 2025-05-12
-  URL:     https://github.com/openshift/bpfman-operator/pull/489
-  Status:  ✗ LGTM ✗ Approved ✓ OK-to-test | ✓ CI Passing
-  Labels:  needs-ok-to-test, konflux-nudge
-  Checks:
-    - tide                                    : PENDING
 ```
 
 ### Filtering by author
@@ -126,10 +119,54 @@ autoprat -r openshift/bpfman-operator --list --author "app/red-hat-konflux" --ne
 autoprat -r openshift/bpfman-operator --list --author ".*konflux.*"
 ```
 
+### Additional GitHub CLI commands for PR exploration
 
-### Example workflow
+Before taking action with autoprat, you may also want to use these GitHub CLI commands to explore PRs:
 
-Here's a complete workflow using list mode with autoprat:
+#### Listing PRs with authors
+
+To list all open PRs in a repository with their authors:
+
+```bash
+gh pr list --repo openshift/bpfman-operator --json number,author,title | jq -r '.[] | "\(.number) - \(.author.login) - \(.title)"'
+```
+
+Example output:
+```
+489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
+488 - app/red-hat-konflux - chore(deps): update ocp-bpfman-agent to 0527d3b
+487 - app/red-hat-konflux - fix(deps): update github.com/openshift/api digest to b7d0ca2
+```
+
+#### Finding unique PR authors
+
+To see all unique authors with open PRs:
+
+```bash
+gh pr list --repo openshift/bpfman-operator --json author | jq -r '.[] | .author.login' | sort | uniq
+```
+
+#### Filtering PRs by content
+
+Find PRs that contain specific patterns in their titles:
+
+```bash
+# Find dependency update PRs
+gh pr list --repo openshift/bpfman-operator --json number,author,title | \
+  jq -r '.[] | select(.title | test("chore\\(deps\\)")) | "\(.number) - \(.author.login) - \(.title)"'
+```
+
+#### Checking PR status and CI jobs
+
+Check CI status for a specific PR:
+
+```bash
+gh pr checks 489 --repo openshift/bpfman-operator
+```
+
+### Complete workflow example
+
+Here's a complete workflow combining GitHub CLI and autoprat:
 
 ```bash
 # 1. Find PRs that need approval
@@ -138,8 +175,8 @@ autoprat -r openshift/bpfman-operator --list --needs-approve
 # 2. Check which of those are from automation accounts
 autoprat -r openshift/bpfman-operator --list --needs-approve --author "app/red-hat-konflux"
 
-# 3. Verify their CI status
-autoprat -r openshift/bpfman-operator --list --needs-approve --author "app/red-hat-konflux"
+# 3. Get detailed view of a specific PR
+autoprat -r openshift/bpfman-operator --list --needs-approve --author "app/red-hat-konflux" 489
 
 # 4. Approve those PRs (with dry-run first)
 autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" --approve
