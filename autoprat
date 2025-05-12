@@ -6,6 +6,21 @@ set -euo pipefail
 # custom comments, or re-trigger commands for failed CI jobs (strips
 # path prefixes for /test and /retest).
 
+# This function gets combined PR data with checks from both PR view and PR checks API
+get_detailed_pr_data() {
+    local pr_num="$1"
+    local repo_name="$2"
+
+    local pr_view_data
+    local pr_checks_data
+
+    pr_view_data=$(gh pr view "$pr_num" --repo "$repo_name" --json number,title,author,url,createdAt,state,labels,statusCheckRollup)
+    pr_checks_data=$(gh pr checks "$pr_num" --repo "$repo_name" --json name,state | jq '[.[] | {context: .name, state: (if .state == "FAILURE" or .state == "failure" or .state == "fail" then "FAILURE" else "SUCCESS" end)}]' 2>/dev/null || echo "[]")
+
+    # Combine the data
+    echo "$pr_view_data" | jq --argjson pr_checks "$pr_checks_data" '. + {extraStatusChecks: $pr_checks}'
+}
+
 declare -A comment_label_map=(
     ["/lgtm"]="lgtm"
     ["/approve"]="approved"
@@ -23,6 +38,11 @@ show_titles=0
 cmd_prefix="/test"    # default CI command prefix.
 repo=""
 author=""
+list_mode=0
+needs_lgtm=0
+needs_approve=0
+needs_ok_to_test=0
+# Removed format option - using default pretty format only
 
 usage() {
     cat <<EOF
@@ -30,12 +50,16 @@ Usage:
   ${0##*/} -r OWNER/REPO [OPTIONS] [PR-NUMBER]
 
 Modes:
-  Without -a: supply a single PR-NUMBER plus any of
-    --lgtm, --approve, --ok-to-test, --comment, --job.
-  With -a:    omit PR-NUMBER and apply to all open PRs.
+  List mode:   use -l/--list to view PRs without taking action
+               - Use with PR-NUMBER to show details for a specific PR
+               - Use without PR-NUMBER to list all PRs
+  Without -a:  supply a single PR-NUMBER plus any of
+               --lgtm, --approve, --ok-to-test, --comment, --job
+  With -a:     omit PR-NUMBER and apply to all open PRs
 
 Options:
   -r, --repo OWNER/REPO   GitHub repo (required)
+  -l, --list              List PRs without taking action
   -a, --all               Apply to all open PRs
   --author PATTERN        Filter PRs by author (regex pattern)
   --lgtm                  Add /lgtm (if no 'lgtm' label yet)
@@ -48,6 +72,9 @@ Options:
   -x, --cmd PREFIX        Prefix for job comments (default: /test)
   -n, --dry-run           Show what would be done without posting
   -t, --show-title        Display PR titles
+  --needs-lgtm            Only show PRs needing LGTM (list mode)
+  --needs-approve         Only show PRs needing approval (list mode)
+  --needs-ok-to-test      Only show PRs needing ok-to-test (list mode)
   -h, --help              Show this help
 
 Examples:
@@ -61,10 +88,10 @@ Examples:
   ${0##*/} -r OWNER/REPO -a -j ci/prow/test-fmt
 
   # All PRs: re-test two jobs, plus a note, dry-run.
-  ${0##*/} -r OWNER/REPO -a -n \\
-     -j ci/prow/test-fmt \\
-     -j ci/prow/security \\
-     -x /retest \\
+  ${0##*/} -r OWNER/REPO -a -n \
+     -j ci/prow/test-fmt \
+     -j ci/prow/security \
+     -x /retest \
      -c "please re-run CI"
 
   # Dry-run only ok-to-test on all PRs.
@@ -78,6 +105,19 @@ Examples:
 
   # Filter PRs by author regex pattern.
   ${0##*/} -r OWNER/REPO -a --author "user.*" --lgtm
+
+  # List all PRs in a repository.
+  ${0##*/} -r OWNER/REPO --list
+
+  # Get detailed information about a specific PR.
+  ${0##*/} -r OWNER/REPO --list 488
+
+  # List PRs from a specific author.
+  ${0##*/} -r OWNER/REPO --list --author "user.*"
+
+  # Find PRs needing approval or lgtm.
+  ${0##*/} -r OWNER/REPO --list --needs-approve --needs-lgtm
+
 EOF
     exit 1
 }
@@ -101,6 +141,77 @@ has_label() {
        --json labels \
        --jq '.labels[] | select(.name == "'"$label"'")' \
        >/dev/null
+}
+
+get_pr_data() {
+    # Build the JSON fields we need for all PRs
+    local fields="number,title,author,url,createdAt,labels,statusCheckRollup,state"
+
+    # Build the JQ filter for filtering PRs
+    local filter='.'
+
+    # Build the filter conditions
+    local conditions=""
+    
+    if [[ "$needs_lgtm" -eq 1 ]]; then
+        conditions="${conditions} and (.labels | map(.name) | contains([\"lgtm\"]) | not)"
+    fi
+    
+    if [[ "$needs_approve" -eq 1 ]]; then
+        conditions="${conditions} and (.labels | map(.name) | contains([\"approved\"]) | not)"
+    fi
+    
+    if [[ "$needs_ok_to_test" -eq 1 ]]; then
+        conditions="${conditions} and (.labels | map(.name) | contains([\"ok-to-test\"]) | not)"
+    fi
+    
+    # Apply filter if we have conditions
+    if [[ -n "$conditions" ]]; then
+        # Remove the leading " and "
+        conditions="${conditions:5}"
+        filter="select($conditions)"
+    fi
+
+    # Add author filter if specified
+    if [[ -n "$author" ]]; then
+        filter="$filter | select(.author.login | test(\"$author\"))"
+    fi
+
+    # Get PR data from GitHub with pretty format
+    gh pr list --repo "$repo" --state open --json "$fields" \
+       --jq ".[] | $filter | \"#\\(.number) - \\(.author.login) - \\(.title)\" +
+            \"\\n  State:   \\(.state) | Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d\"))\" +
+            \"\\n  URL:     \\(.url)\" +
+            \"\\n  Status:\" +
+            \"\\n    - Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
+            \"\\n    - CI: \" + (if .statusCheckRollup then
+                (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
+                 then \"✗ Failing\"
+                 else \"✓ Passing\"
+                 end)
+             else \"? Unknown\" end) +
+            \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
+            \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) +
+            \"\\n  Labels:\" +
+            (if (.labels | length > 0) then
+                (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
+             else
+                \"  None\"
+             end) +
+            \"\\n  Checks:\" +
+            (.statusCheckRollup |
+                if . then
+                    # Filter out empty contexts and create a fixed-width format
+                    map(
+                        select(.context != null and .context != \"\")
+                    ) | sort_by(.context) | map(
+                        # Show full context name without width restriction
+                        \"\\n    - \" + .context + \": \" + .state
+                    ) | join(\"\")
+                else
+                    \"  None\"
+                end
+            )"
 }
 
 post_jobs() {
@@ -144,35 +255,121 @@ post_labels_and_comments() {
     (( did > 0 ))
 }
 
-ARGS=$(getopt -o r:c:anj:x:th \
-              --long repo:,comment:,all,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,help \
+ARGS=$(getopt -o r:c:alnj:x:th \
+              --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,needs-lgtm,needs-approve,needs-ok-to-test,help \
               -- "$@")
 eval set -- "$ARGS"
 
 while true; do
     case "$1" in
-        -r|--repo)       repo="$2";         shift 2 ;;
-        -a|--all)        all_prs=1;         shift ;;
-        --author)        author="$2";       shift 2 ;;
-        --lgtm)          comments+=("/lgtm");       shift ;;
-        --approve)       comments+=("/approve");    shift ;;
-        --ok-to-test)    comments+=("/ok-to-test"); shift ;;
-        -c|--comment)    comments+=("$2");          shift 2 ;;
-        -j|--job)        jobs+=("$2");              shift 2 ;;
-        -x|--cmd)        cmd_prefix="$2";           shift 2 ;;
-        -n|--dry-run)    dry_run=1;                 shift ;;
-        -t|--show-title) show_titles=1;             shift ;;
-        -h|--help)       usage ;;
-        --)              shift; break ;;
-        *)               usage ;;
+        -r|--repo)           repo="$2";         shift 2 ;;
+        -a|--all)            all_prs=1;         shift ;;
+        -l|--list)           list_mode=1;       shift ;;
+        --author)            author="$2";       shift 2 ;;
+        --lgtm)              comments+=("/lgtm");       shift ;;
+        --approve)           comments+=("/approve");    shift ;;
+        --ok-to-test)        comments+=("/ok-to-test"); shift ;;
+        -c|--comment)        comments+=("$2");          shift 2 ;;
+        -j|--job)            jobs+=("$2");              shift 2 ;;
+        -x|--cmd)            cmd_prefix="$2";           shift 2 ;;
+        -n|--dry-run)        dry_run=1;                 shift ;;
+        -t|--show-title)     show_titles=1;             shift ;;
+        --needs-lgtm)        needs_lgtm=1;              shift ;;
+        --needs-approve)     needs_approve=1;           shift ;;
+        --needs-ok-to-test)  needs_ok_to_test=1;        shift ;;
+        -h|--help)           usage ;;
+        --)                  shift; break ;;
+        *)                   usage ;;
     esac
 done
 
 [[ -z "$repo" ]] && { echo "Error: --repo is required" >&2; exit 1; }
 
-if [[ ${#comments[@]} -eq 0 && ${#jobs[@]} -eq 0 ]]; then
-    echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment or --job" >&2
+# If we're in list mode, don't require comments or jobs
+if [[ "$list_mode" -eq 0 && ${#comments[@]} -eq 0 && ${#jobs[@]} -eq 0 ]]; then
+    echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment or --job, or use --list mode" >&2
     exit 1
+fi
+
+# If we're in list mode, run that and exit
+if [[ "$list_mode" -eq 1 ]]; then
+    # For debugging, show what we're fetching
+    if [[ "$dry_run" -eq 1 ]]; then
+        echo "List mode configuration:"
+        echo "  Repository: $repo"
+        echo "  Author filter: ${author:-none}"
+        echo "  Needs LGTM: $needs_lgtm"
+        echo "  Needs approval: $needs_approve"
+        echo "  Needs ok-to-test: $needs_ok_to_test"
+        echo ""
+    fi
+
+    # If a PR number is provided, show details for just that PR
+    if [[ "$all_prs" -eq 0 && $# -eq 1 ]]; then
+        pr_number="$1"
+
+        # Get the detailed PR data with all checks
+        get_detailed_pr_data "$pr_number" "$repo" | \
+            jq -r "
+                \"#\\(.number) - \\(.author.login) - \\(.title)\" +
+                \"\\n  State:   \\(.state) | Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d\"))\" +
+                \"\\n  URL:     \\(.url)\" +
+                \"\\n  Status:\" +
+                \"\\n    - Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
+                \"\\n    - CI: \" + (
+                    if (.statusCheckRollup or .extraStatusChecks) then
+                        (
+                            if (
+                                (.statusCheckRollup // [] | map(select(.state == \"FAILURE\")) | length > 0) or
+                                (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
+                            )
+                            then \"✗ Failing\"
+                            else \"✓ Passing\"
+                            end
+                        )
+                    else
+                        \"? Unknown\"
+                    end
+                ) +
+                \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
+                \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) +
+                \"\\n  Labels:\" +
+                (if (.labels | length > 0) then
+                    (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
+                else
+                    \"  None\"
+                end) +
+                \"\\n  Checks:\" +
+                (
+                    # Combine both statusCheckRollup and extraStatusChecks
+                    [
+                        (.statusCheckRollup // [] | map({context: .context, state: .state})),
+                        (.extraStatusChecks // [])
+                    ] | add |
+                    if length > 0 then
+                        # Remove duplicates by context, prioritizing statusCheckRollup
+                        map(
+                            select(.context != null and .context != \"\")
+                        ) |
+                        unique_by(.context) |
+                        sort_by(.context) |
+                        map(
+                            # Show full context name without width restriction
+                            \"\\n    - \" + .context + \": \" + .state
+                        ) | join(\"\")
+                    else
+                        \"  None\"
+                    end
+                )
+            "
+    else
+        # When listing all PRs, treat as operating on all PRs
+        all_prs=1
+        
+        # Display the PR data
+        get_pr_data
+    fi
+    exit 0
 fi
 
 if [[ "$all_prs" -eq 1 ]]; then

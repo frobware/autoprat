@@ -43,90 +43,105 @@ You are tired of:
 
 ---
 
-## Exploring PRs for autoprat
+## Exploring PRs with autoprat
 
-Before using `autoprat`, you may want to explore the PRs in a repository to understand who the authors are or which PRs need attention. Here are some helpful commands using real examples from the openshift/bpfman-operator repo:
+**autoprat** includes a built-in list mode that makes it easy to explore PRs before taking action. Use the `--list` option to see what PRs are available and which ones need attention.
 
-### Listing PRs with authors
+### Basic listing
 
-To list all open PRs in a repository with their authors:
+List all open PRs in a repository:
 
 ```bash
-gh pr list --repo openshift/bpfman-operator --json number,author,title | jq -r '.[] | "\(.number) - \(.author.login) - \(.title)"'
+autoprat -r openshift/bpfman-operator --list
+```
+
+Get detailed information about a specific PR:
+
+```bash
+autoprat -r openshift/bpfman-operator --list 488
 ```
 
 Example output:
 ```
-489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
-488 - app/red-hat-konflux - chore(deps): update ocp-bpfman-agent to 0527d3b
-487 - app/red-hat-konflux - fix(deps): update github.com/openshift/api digest to b7d0ca2
+#489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
+#488 - app/red-hat-konflux - chore(deps): update ocp-bpfman-agent to 0527d3b
+#487 - app/red-hat-konflux - fix(deps): update github.com/openshift/api digest to b7d0ca2
 ```
 
-### Finding unique PR authors
+### Finding PRs that need attention
 
-To see all unique authors with open PRs:
+Find PRs that need approval or LGTM:
 
 ```bash
-gh pr list --repo openshift/bpfman-operator --json author | jq -r '.[] | .author.login' | sort | uniq
+# Find PRs that need approval
+autoprat -r openshift/bpfman-operator --list --needs-approve
+
+# Find PRs that need LGTM
+autoprat -r openshift/bpfman-operator --list --needs-lgtm
+
+# Find PRs needing both
+autoprat -r openshift/bpfman-operator --list --needs-approve --needs-lgtm
+```
+
+### Viewing PR details
+
+When listing PRs, you'll see complete information including labels and CI status:
+
+```bash
+autoprat -r openshift/bpfman-operator --list
 ```
 
 Example output:
 ```
-app/red-hat-konflux
+#489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
+  State:   OPEN | Created: 2025-05-12
+  URL:     https://github.com/openshift/bpfman-operator/pull/489
+  Status:  ✗ LGTM ✗ Approved ✓ OK-to-test | ✓ CI Passing
+  Labels:  needs-ok-to-test, konflux-nudge
+  Checks:
+    - tide                                    : PENDING
 ```
 
-### Filtering PRs by content
+### Filtering by author
 
-Find PRs that contain specific patterns in their titles:
+Filter PRs by author using exact match or regex patterns:
 
 ```bash
-# Find dependency update PRs
-gh pr list --repo openshift/bpfman-operator --json number,author,title | \
-  jq -r '.[] | select(.title | test("chore\\(deps\\)")) | "\(.number) - \(.author.login) - \(.title)"'
+# Exact match for a specific author
+autoprat -r openshift/bpfman-operator --list --author "app/red-hat-konflux"
+
+# Regex pattern to find bot authors
+autoprat -r openshift/bpfman-operator --list --author ".*bot.*"
 ```
 
-Example output:
-```
-489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
-488 - app/red-hat-konflux - chore(deps): update ocp-bpfman-agent to 0527d3b
-485 - app/red-hat-konflux - chore(deps): update google.golang.org/genproto/googleapis/rpc digest to f936aa4
-```
+### Advanced usage
 
-### Checking PR status and CI jobs
-
-Check CI status for a specific PR:
+Combine filters for targeted searching:
 
 ```bash
-gh pr checks 489 --repo openshift/bpfman-operator
+# Find PRs from automated accounts that need approval
+autoprat -r openshift/bpfman-operator --list --author "app/red-hat-konflux" --needs-approve
+
+# Check CI status of PRs matching a pattern
+autoprat -r openshift/bpfman-operator --list --author ".*konflux.*"
 ```
 
-Example output:
-```
-Red Hat Konflux / bpfman-operator-enterprise-contract / ocp-bpfman-operator-bundle	fail	1s
-Red Hat Konflux / bpfman-operator-bundle-on-pull-request	pass	2m54s
-tide	pending	0	Not mergeable. Needs approved, lgtm labels.
-```
 
-### Real-world workflow example
+### Example workflow
 
-Here's a complete workflow example using a real repository:
+Here's a complete workflow using list mode with autoprat:
 
 ```bash
-# 1. First, find PRs that need approval
-NEEDS_APPROVAL=$(gh pr list --repo openshift/bpfman-operator --json number,author,title,labels | \
-  jq -r '.[] | select(.labels | map(.name) | contains(["approved"]) | not) | "\(.number) - \(.author.login) - \(.title)"')
+# 1. Find PRs that need approval
+autoprat -r openshift/bpfman-operator --list --needs-approve
 
-# 2. Display them for review
-echo "$NEEDS_APPROVAL"
+# 2. Check which of those are from automation accounts
+autoprat -r openshift/bpfman-operator --list --needs-approve --author "app/red-hat-konflux"
 
-# Output:
-# 489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
-# 488 - app/red-hat-konflux - chore(deps): update ocp-bpfman-agent to 0527d3b
+# 3. Verify their CI status
+autoprat -r openshift/bpfman-operator --list --needs-approve --author "app/red-hat-konflux"
 
-# 3. Filter to find automation PRs that need approval
-echo "$NEEDS_APPROVAL" | grep "app/red-hat-konflux"
-
-# 4. Use autoprat to approve just those PRs (with dry-run first)
+# 4. Approve those PRs (with dry-run first)
 autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" --approve
 
 # 5. If everything looks good, run without -n to actually post the comments
