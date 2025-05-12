@@ -15,12 +15,14 @@ declare -A comment_label_map=(
 declare -a comments=()
 declare -a jobs=()
 declare -A pr_titles=()
+declare -A pr_authors=()
 
 all_prs=0
 dry_run=0
 show_titles=0
 cmd_prefix="/test"    # default CI command prefix.
 repo=""
+author=""
 
 usage() {
     cat <<EOF
@@ -35,6 +37,7 @@ Modes:
 Options:
   -r, --repo OWNER/REPO   GitHub repo (required)
   -a, --all               Apply to all open PRs
+  --author PATTERN        Filter PRs by author (regex pattern)
   --lgtm                  Add /lgtm (if no 'lgtm' label yet)
   --approve               Add /approve (if no 'approved' label yet)
   --ok-to-test            Add /ok-to-test (if no 'ok-to-test' label yet)
@@ -69,6 +72,12 @@ Examples:
 
   # Dry-run only lgtm+approve on all PRs.
   ${0##*/} -r OWNER/REPO -a -n --lgtm --approve
+
+  # Approve all PRs from a specific author.
+  ${0##*/} -r OWNER/REPO -a --author "username" --approve
+
+  # Filter PRs by author regex pattern.
+  ${0##*/} -r OWNER/REPO -a --author "user.*" --lgtm
 EOF
     exit 1
 }
@@ -136,7 +145,7 @@ post_labels_and_comments() {
 }
 
 ARGS=$(getopt -o r:c:anj:x:th \
-              --long repo:,comment:,all,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,help \
+              --long repo:,comment:,all,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,help \
               -- "$@")
 eval set -- "$ARGS"
 
@@ -144,6 +153,7 @@ while true; do
     case "$1" in
         -r|--repo)       repo="$2";         shift 2 ;;
         -a|--all)        all_prs=1;         shift ;;
+        --author)        author="$2";       shift 2 ;;
         --lgtm)          comments+=("/lgtm");       shift ;;
         --approve)       comments+=("/approve");    shift ;;
         --ok-to-test)    comments+=("/ok-to-test"); shift ;;
@@ -170,17 +180,31 @@ if [[ "$all_prs" -eq 1 ]]; then
 else
     [[ $# -ne 1 ]] && usage
     pr_number="$1"
+
+    # Warn if author is used without -a flag, since it has no effect
+    if [[ -n "$author" ]]; then
+        echo "Warning: --author flag has no effect without -a flag" >&2
+    fi
 fi
 
 if [[ "$all_prs" -eq 1 && "$show_titles" -eq 1 ]]; then
-    while IFS=$'\t' read -r num title; do
+    # Include author data when fetching PR titles
+    while IFS=$'\t' read -r num title author; do
         pr_titles["$num"]="$title"
-    done < <(gh pr list --repo "$repo" --state open --json number,title \
-                --jq '.[] | [.number, .title] | @tsv')
+        pr_authors["$num"]="$author"
+    done < <(gh pr list --repo "$repo" --state open --json number,title,author \
+                --jq '.[] | [.number, .title, .author.login] | @tsv')
 fi
 
 if [[ "$all_prs" -eq 1 ]]; then
-    pr_list=$(gh pr list --repo "$repo" --state open --json number --jq '.[].number')
+    if [[ -n "$author" ]]; then
+        # Filter PRs by author regex pattern
+        pr_list=$(gh pr list --repo "$repo" --state open --json number,author \
+                     --jq '.[] | select(.author.login | test("'"$author"'")) | .number')
+    else
+        # No author filter
+        pr_list=$(gh pr list --repo "$repo" --state open --json number --jq '.[].number')
+    fi
 else
     pr_list="$pr_number"
 fi
@@ -188,7 +212,11 @@ fi
 while read -r pr; do
     [[ -z "$pr" ]] && continue
     if [[ "$show_titles" -eq 1 && -n "${pr_titles[$pr]:-}" ]]; then
-        echo "==> PR #$pr: ${pr_titles[$pr]}"
+        if [[ -n "${pr_authors[$pr]:-}" ]]; then
+            echo "==> PR #$pr (${pr_authors[$pr]}): ${pr_titles[$pr]}"
+        else
+            echo "==> PR #$pr: ${pr_titles[$pr]}"
+        fi
     else
         echo "==> PR #$pr"
     fi
