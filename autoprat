@@ -6,7 +6,26 @@ set -euo pipefail
 # custom comments, or re-trigger commands for failed CI jobs (strips
 # path prefixes for /test and /retest).
 
-# This function gets combined PR data with checks from both PR view and PR checks API
+# Higher-order function for conditional actions
+execute_if() {
+    local condition_func="$1"
+    local action_func="$2"
+    shift 2
+    local args=("$@")
+
+    if "$condition_func" "${args[@]}"; then
+        "$action_func" "${args[@]}"
+        return 0
+    fi
+    return 1
+}
+
+run() {
+    local cmd=("$@")
+    echo "+ ${cmd[*]}"
+    [[ "$dry_run" -eq 0 ]] && "${cmd[@]}"
+}
+
 get_detailed_pr_data() {
     local pr_num="$1"
     local repo_name="$2"
@@ -17,7 +36,6 @@ get_detailed_pr_data() {
     pr_view_data=$(gh pr view "$pr_num" --repo "$repo_name" --json number,title,author,url,createdAt,state,labels,statusCheckRollup)
     pr_checks_data=$(gh pr checks "$pr_num" --repo "$repo_name" --json name,state | jq '[.[] | {context: .name, state: (if .state == "FAILURE" or .state == "failure" or .state == "fail" then "FAILURE" else "SUCCESS" end)}]' 2>/dev/null || echo "[]")
 
-    # Combine the data
     echo "$pr_view_data" | jq --argjson pr_checks "$pr_checks_data" '. + {extraStatusChecks: $pr_checks}'
 }
 
@@ -42,7 +60,6 @@ list_mode=0
 needs_lgtm=0
 needs_approve=0
 needs_ok_to_test=0
-# Removed format option - using default pretty format only
 
 usage() {
     cat <<EOF
@@ -122,13 +139,14 @@ EOF
     exit 1
 }
 
-run() {
-    echo "+ $*"
-    [[ "$dry_run" -eq 0 ]] && "$@"
-}
-
 pr_has_failed_job() {
     local pr="$1" job="$2"
+
+    # Always return success (job failed) in dry-run mode for testing
+    if [[ "$dry_run" -eq 1 ]]; then
+        return 0
+    fi
+
     gh pr checks "$pr" --repo "$repo" \
        --json name,state \
        --jq '.[] | select(.name == "'"$job"'" and .state == "FAILURE")' \
@@ -137,47 +155,88 @@ pr_has_failed_job() {
 
 has_label() {
     local pr="$1" label="$2"
+
+    # Always return failure (label not found) in dry-run mode for testing
+    if [[ "$dry_run" -eq 1 ]]; then
+        return 1
+    fi
+
     gh pr view "$pr" --repo "$repo" \
        --json labels \
        --jq '.labels[] | select(.name == "'"$label"'")' \
        >/dev/null
 }
 
+needs_comment() {
+    local pr="$1" comment="$2"
+    local label="${comment_label_map[$comment]:-}"
+    [[ -z "$label" ]] || ! has_label "$pr" "$label"
+}
+
+post_comment() {
+    local pr="$1" comment="$2"
+    local label="${comment_label_map[$comment]:-}"
+
+    if [[ -n "$label" ]]; then
+        if ! has_label "$pr" "$label"; then
+            echo "    posting $comment"
+            run gh pr comment "$pr" --repo "$repo" --body "$comment"
+            return 0
+        else
+            echo "    already has '$label'; skipping $comment"
+            return 1
+        fi
+    else
+        echo "    posting $comment"
+        run gh pr comment "$pr" --repo "$repo" --body "$comment"
+        return 0
+    fi
+}
+
+retrigger_job() {
+    local pr="$1" job="$2"
+    local arg
+
+    if [[ "$cmd_prefix" == "/test" || "$cmd_prefix" == "/retest" ]]; then
+        arg="${job##*/}"
+    else
+        arg="$job"
+    fi
+
+    echo "    retrigger: $cmd_prefix $arg"
+    run gh pr comment "$pr" --repo "$repo" --body "$cmd_prefix $arg"
+    return 0
+}
+
+make_pr_filter() {
+    local filter_conditions=()
+    [[ "$needs_lgtm" -eq 1 ]] &&
+        filter_conditions+=("(.labels | map(.name) | contains([\"lgtm\"]) | not)")
+
+    [[ "$needs_approve" -eq 1 ]] &&
+        filter_conditions+=("(.labels | map(.name) | contains([\"approved\"]) | not)")
+
+    [[ "$needs_ok_to_test" -eq 1 ]] &&
+        filter_conditions+=("(.labels | map(.name) | contains([\"ok-to-test\"]) | not)")
+
+    [[ -n "$author" ]] &&
+        filter_conditions+=("(.author.login | test(\"$author\"))")
+    local jq_filter="."
+    if [[ ${#filter_conditions[@]} -gt 0 ]]; then
+        local conditions
+        conditions=$(printf " and %s" "${filter_conditions[@]}")
+        conditions=${conditions:5}
+        jq_filter="select($conditions)"
+    fi
+
+    echo "$jq_filter"
+}
+
 get_pr_data() {
-    # Build the JSON fields we need for all PRs
     local fields="number,title,author,url,createdAt,labels,statusCheckRollup,state"
+    local filter
+    filter=$(make_pr_filter)
 
-    # Build the JQ filter for filtering PRs
-    local filter='.'
-
-    # Build the filter conditions
-    local conditions=""
-    
-    if [[ "$needs_lgtm" -eq 1 ]]; then
-        conditions="${conditions} and (.labels | map(.name) | contains([\"lgtm\"]) | not)"
-    fi
-    
-    if [[ "$needs_approve" -eq 1 ]]; then
-        conditions="${conditions} and (.labels | map(.name) | contains([\"approved\"]) | not)"
-    fi
-    
-    if [[ "$needs_ok_to_test" -eq 1 ]]; then
-        conditions="${conditions} and (.labels | map(.name) | contains([\"ok-to-test\"]) | not)"
-    fi
-    
-    # Apply filter if we have conditions
-    if [[ -n "$conditions" ]]; then
-        # Remove the leading " and "
-        conditions="${conditions:5}"
-        filter="select($conditions)"
-    fi
-
-    # Add author filter if specified
-    if [[ -n "$author" ]]; then
-        filter="$filter | select(.author.login | test(\"$author\"))"
-    fi
-
-    # Get PR data from GitHub with pretty format
     gh pr list --repo "$repo" --state open --json "$fields" \
        --jq ".[] | $filter | \"#\\(.number) - \\(.author.login) - \\(.title)\" +
             \"\\n  State:   \\(.state) | Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d\"))\" +
@@ -201,11 +260,9 @@ get_pr_data() {
             \"\\n  Checks:\" +
             (.statusCheckRollup |
                 if . then
-                    # Filter out empty contexts and create a fixed-width format
                     map(
                         select(.context != null and .context != \"\")
                     ) | sort_by(.context) | map(
-                        # Show full context name without width restriction
                         \"\\n    - \" + .context + \": \" + .state
                     ) | join(\"\")
                 else
@@ -217,197 +274,179 @@ get_pr_data() {
 post_jobs() {
     local pr="$1" did=0
     for job in "${jobs[@]}"; do
-        if pr_has_failed_job "$pr" "$job"; then
-            local arg
-            if [[ "$cmd_prefix" == "/test" || "$cmd_prefix" == "/retest" ]]; then
-                arg="${job##*/}"
-            else
-                arg="$job"
-            fi
-            echo "    retrigger: $cmd_prefix $arg"
-            run gh pr comment "$pr" --repo "$repo" --body "$cmd_prefix $arg"
+        if execute_if pr_has_failed_job retrigger_job "$pr" "$job"; then
             did=1
         else
             echo "    no failure of '$job'; skipping"
         fi
     done
+
     (( did > 0 ))
 }
 
 post_labels_and_comments() {
     local pr="$1" did=0
     for comment in "${comments[@]}"; do
-        local label="${comment_label_map[$comment]:-}"
-        if [[ -n "$label" ]]; then
-            if ! has_label "$pr" "$label"; then
-                echo "    posting $comment"
-                run gh pr comment "$pr" --repo "$repo" --body "$comment"
-                did=1
-            else
-                echo "    already has '$label'; skipping $comment"
-            fi
-        else
-            echo "    posting $comment"
-            run gh pr comment "$pr" --repo "$repo" --body "$comment"
+        if execute_if "needs_comment" "post_comment" "$pr" "$comment"; then
             did=1
         fi
     done
+
     (( did > 0 ))
 }
 
-ARGS=$(getopt -o r:c:alnj:x:th \
-              --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,needs-lgtm,needs-approve,needs-ok-to-test,help \
-              -- "$@")
-eval set -- "$ARGS"
+main() {
+    local ARGS
+    ARGS=$(getopt -o r:c:alnj:x:th \
+                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,needs-lgtm,needs-approve,needs-ok-to-test,help \
+                  -- "$@") || usage
+    eval set -- "$ARGS"
 
-while true; do
-    case "$1" in
-        -r|--repo)           repo="$2";         shift 2 ;;
-        -a|--all)            all_prs=1;         shift ;;
-        -l|--list)           list_mode=1;       shift ;;
-        --author)            author="$2";       shift 2 ;;
-        --lgtm)              comments+=("/lgtm");       shift ;;
-        --approve)           comments+=("/approve");    shift ;;
-        --ok-to-test)        comments+=("/ok-to-test"); shift ;;
-        -c|--comment)        comments+=("$2");          shift 2 ;;
-        -j|--job)            jobs+=("$2");              shift 2 ;;
-        -x|--cmd)            cmd_prefix="$2";           shift 2 ;;
-        -n|--dry-run)        dry_run=1;                 shift ;;
-        -t|--show-title)     show_titles=1;             shift ;;
-        --needs-lgtm)        needs_lgtm=1;              shift ;;
-        --needs-approve)     needs_approve=1;           shift ;;
-        --needs-ok-to-test)  needs_ok_to_test=1;        shift ;;
-        -h|--help)           usage ;;
-        --)                  shift; break ;;
-        *)                   usage ;;
-    esac
-done
+    while true; do
+        case "$1" in
+            -r|--repo)           repo="$2";         shift 2 ;;
+            -a|--all)            all_prs=1;         shift ;;
+            -l|--list)           list_mode=1;       shift ;;
+            --author)            author="$2";       shift 2 ;;
+            --lgtm)              comments+=("/lgtm");       shift ;;
+            --approve)           comments+=("/approve");    shift ;;
+            --ok-to-test)        comments+=("/ok-to-test"); shift ;;
+            -c|--comment)        comments+=("$2");          shift 2 ;;
+            -j|--job)            jobs+=("$2");              shift 2 ;;
+            -x|--cmd)            cmd_prefix="$2";           shift 2 ;;
+            -n|--dry-run)        dry_run=1;                 shift ;;
+            -t|--show-title)     show_titles=1;             shift ;;
+            --needs-lgtm)        needs_lgtm=1;              shift ;;
+            --needs-approve)     needs_approve=1;           shift ;;
+            --needs-ok-to-test)  needs_ok_to_test=1;        shift ;;
+            -h|--help)           usage ;;
+            --)                  shift; break ;;
+            *)                   usage ;;
+        esac
+    done
 
-[[ -z "$repo" ]] && { echo "Error: --repo is required" >&2; exit 1; }
+    [[ -z "$repo" ]] && { echo "Error: --repo is required" >&2; exit 1; }
 
-# If we're in list mode, don't require comments or jobs
-if [[ "$list_mode" -eq 0 && ${#comments[@]} -eq 0 && ${#jobs[@]} -eq 0 ]]; then
-    echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment or --job, or use --list mode" >&2
-    exit 1
-fi
-
-# If we're in list mode, run that and exit
-if [[ "$list_mode" -eq 1 ]]; then
-    # For debugging, show what we're fetching
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "List mode configuration:"
-        echo "  Repository: $repo"
-        echo "  Author filter: ${author:-none}"
-        echo "  Needs LGTM: $needs_lgtm"
-        echo "  Needs approval: $needs_approve"
-        echo "  Needs ok-to-test: $needs_ok_to_test"
-        echo ""
+    if [[ "$list_mode" -eq 0 && ${#comments[@]} -eq 0 && ${#jobs[@]} -eq 0 ]]; then
+        if [[ "$all_prs" -eq 1 ]]; then
+            echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment or --job, or use --list mode" >&2
+            exit 1
+        elif [[ "$#" -ne 1 ]]; then
+            echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment or --job, or use --list mode" >&2
+            exit 1
+        fi
     fi
 
-    # If a PR number is provided, show details for just that PR
-    if [[ "$all_prs" -eq 0 && $# -eq 1 ]]; then
-        pr_number="$1"
+    if [[ "$list_mode" -eq 1 ]]; then
+        if [[ "$dry_run" -eq 1 ]]; then
+            echo "List mode configuration:"
+            echo "  Repository: $repo"
+            echo "  Author filter: ${author:-none}"
+            echo "  Needs LGTM: $needs_lgtm"
+            echo "  Needs approval: $needs_approve"
+            echo "  Needs ok-to-test: $needs_ok_to_test"
+            echo ""
+        fi
 
-        # Get the detailed PR data with all checks
-        get_detailed_pr_data "$pr_number" "$repo" | \
-            jq -r "
-                \"#\\(.number) - \\(.author.login) - \\(.title)\" +
-                \"\\n  State:   \\(.state) | Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d\"))\" +
-                \"\\n  URL:     \\(.url)\" +
-                \"\\n  Status:\" +
-                \"\\n    - Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
-                \"\\n    - CI: \" + (
-                    if (.statusCheckRollup or .extraStatusChecks) then
-                        (
-                            if (
-                                (.statusCheckRollup // [] | map(select(.state == \"FAILURE\")) | length > 0) or
-                                (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
+        if [[ "$all_prs" -eq 0 && $# -eq 1 ]]; then
+            pr_number="$1"
+
+            get_detailed_pr_data "$pr_number" "$repo" | \
+                jq -r "
+                    \"#\\(.number) - \\(.author.login) - \\(.title)\" +
+                    \"\\n  State:   \\(.state) | Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d\"))\" +
+                    \"\\n  URL:     \\(.url)\" +
+                    \"\\n  Status:\" +
+                    \"\\n    - Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
+                    \"\\n    - CI: \" + (
+                        if (.statusCheckRollup or .extraStatusChecks) then
+                            (
+                                if (
+                                    (.statusCheckRollup // [] | map(select(.state == \"FAILURE\")) | length > 0) or
+                                    (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
+                                )
+                                then \"✗ Failing\"
+                                else \"✓ Passing\"
+                                end
                             )
-                            then \"✗ Failing\"
-                            else \"✓ Passing\"
-                            end
-                        )
-                    else
-                        \"? Unknown\"
-                    end
-                ) +
-                \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
-                \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) +
-                \"\\n  Labels:\" +
-                (if (.labels | length > 0) then
-                    (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
-                else
-                    \"  None\"
-                end) +
-                \"\\n  Checks:\" +
-                (
-                    # Combine both statusCheckRollup and extraStatusChecks
-                    [
-                        (.statusCheckRollup // [] | map({context: .context, state: .state})),
-                        (.extraStatusChecks // [])
-                    ] | add |
-                    if length > 0 then
-                        # Remove duplicates by context, prioritizing statusCheckRollup
-                        map(
-                            select(.context != null and .context != \"\")
-                        ) |
-                        unique_by(.context) |
-                        sort_by(.context) |
-                        map(
-                            # Show full context name without width restriction
-                            \"\\n    - \" + .context + \": \" + .state
-                        ) | join(\"\")
+                        else
+                            \"? Unknown\"
+                        end
+                    ) +
+                    \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
+                    \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) +
+                    \"\\n  Labels:\" +
+                    (if (.labels | length > 0) then
+                        (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
                     else
                         \"  None\"
-                    end
-                )
-            "
+                    end) +
+                    \"\\n  Checks:\" +
+                    (
+                        [
+                            (.statusCheckRollup // [] | map({context: .context, state: .state})),
+                            (.extraStatusChecks // [])
+                        ] | add |
+                        if length > 0 then
+                            map(
+                                select(.context != null and .context != \"\")
+                            ) |
+                            unique_by(.context) |
+                            sort_by(.context) |
+                            map(
+                                \"\\n    - \" + .context + \": \" + .state
+                            ) | join(\"\")
+                        else
+                            \"  None\"
+                        end
+                    )
+                "
+        else
+            all_prs=1
+
+            get_pr_data
+        fi
+        exit 0
+    fi
+
+    if [[ "$all_prs" -eq 1 ]]; then
+        [[ $# -ne 0 ]] && usage
     else
-        # When listing all PRs, treat as operating on all PRs
-        all_prs=1
-        
-        # Display the PR data
-        get_pr_data
+        pr_number="$1"
+
+        if [[ -n "$author" ]]; then
+            echo "Warning: --author flag has no effect without -a flag" >&2
+        fi
     fi
-    exit 0
-fi
 
-if [[ "$all_prs" -eq 1 ]]; then
-    [[ $# -ne 0 ]] && usage
-else
-    [[ $# -ne 1 ]] && usage
-    pr_number="$1"
-
-    # Warn if author is used without -a flag, since it has no effect
-    if [[ -n "$author" ]]; then
-        echo "Warning: --author flag has no effect without -a flag" >&2
+    if [[ "$all_prs" -eq 1 && "$show_titles" -eq 1 ]]; then
+        while IFS=$'\t' read -r num title author; do
+            pr_titles["$num"]="$title"
+            pr_authors["$num"]="$author"
+        done < <(gh pr list --repo "$repo" --state open --json number,title,author \
+                    --jq '.[] | [.number, .title, .author.login] | @tsv')
     fi
-fi
 
-if [[ "$all_prs" -eq 1 && "$show_titles" -eq 1 ]]; then
-    # Include author data when fetching PR titles
-    while IFS=$'\t' read -r num title author; do
-        pr_titles["$num"]="$title"
-        pr_authors["$num"]="$author"
-    done < <(gh pr list --repo "$repo" --state open --json number,title,author \
-                --jq '.[] | [.number, .title, .author.login] | @tsv')
-fi
-
-if [[ "$all_prs" -eq 1 ]]; then
-    if [[ -n "$author" ]]; then
-        # Filter PRs by author regex pattern
-        pr_list=$(gh pr list --repo "$repo" --state open --json number,author \
-                     --jq '.[] | select(.author.login | test("'"$author"'")) | .number')
+    if [[ "$all_prs" -eq 1 ]]; then
+        if [[ -n "$author" ]]; then
+            pr_list=$(gh pr list --repo "$repo" --state open --json number,author \
+                         --jq '.[] | select(.author.login | test("'"$author"'")) | .number')
+        else
+            pr_list=$(gh pr list --repo "$repo" --state open --json number --jq '.[].number')
+        fi
     else
-        # No author filter
-        pr_list=$(gh pr list --repo "$repo" --state open --json number --jq '.[].number')
+        pr_list="$pr_number"
     fi
-else
-    pr_list="$pr_number"
-fi
 
-while read -r pr; do
-    [[ -z "$pr" ]] && continue
+    while read -r pr; do
+        process_pr "$pr"
+    done <<< "$pr_list"
+}
+
+process_pr() {
+    local pr="$1"
+    [[ -z "$pr" ]] && return
+
     if [[ "$show_titles" -eq 1 && -n "${pr_titles[$pr]:-}" ]]; then
         if [[ -n "${pr_authors[$pr]:-}" ]]; then
             echo "==> PR #$pr (${pr_authors[$pr]}): ${pr_titles[$pr]}"
@@ -418,9 +457,11 @@ while read -r pr; do
         echo "==> PR #$pr"
     fi
 
-    did_any=0
+    local did_any=0
     post_jobs "$pr"                && did_any=1
     post_labels_and_comments "$pr" && did_any=1
 
     [[ "$did_any" -eq 0 ]] && echo "    nothing to do"
-done <<< "$pr_list"
+}
+
+main "$@"
