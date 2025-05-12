@@ -219,7 +219,7 @@ make_pr_filter() {
         filter_conditions+=("(.labels | map(.name) | contains([\"approved\"]) | not)")
 
     [[ "$needs_ok_to_test" -eq 1 ]] &&
-        filter_conditions+=("(.labels | map(.name) | contains([\"ok-to-test\"]) | not)")
+        filter_conditions+=("((.labels | map(.name) | contains([\"needs-ok-to-test\"])) or (.labels | map(.name) | contains([\"ok-to-test\"]) | not))")
 
     [[ -n "$author" ]] &&
         filter_conditions+=("(.author.login | test(\"$author\"))")
@@ -252,7 +252,7 @@ get_pr_data() {
                  end)
              else \"? Unknown\" end) +
             \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
-            \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) +
+            \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"✗\" else (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) end) +
             \"\\n  Labels:\" +
             (if (.labels | length > 0) then
                 (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
@@ -381,7 +381,7 @@ main() {
                         end
                     ) +
                     \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
-                    \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) +
+                    \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"✗\" else (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) end) +
                     \"\\n  Labels:\" +
                     (if (.labels | length > 0) then
                         (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
