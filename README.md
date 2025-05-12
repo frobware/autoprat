@@ -119,54 +119,10 @@ autoprat -r openshift/bpfman-operator --list --author "app/red-hat-konflux" --ne
 autoprat -r openshift/bpfman-operator --list --author ".*konflux.*"
 ```
 
-### Additional GitHub CLI commands for PR exploration
-
-Before taking action with autoprat, you may also want to use these GitHub CLI commands to explore PRs:
-
-#### Listing PRs with authors
-
-To list all open PRs in a repository with their authors:
-
-```bash
-gh pr list --repo openshift/bpfman-operator --json number,author,title | jq -r '.[] | "\(.number) - \(.author.login) - \(.title)"'
-```
-
-Example output:
-```
-489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
-488 - app/red-hat-konflux - chore(deps): update ocp-bpfman-agent to 0527d3b
-487 - app/red-hat-konflux - fix(deps): update github.com/openshift/api digest to b7d0ca2
-```
-
-#### Finding unique PR authors
-
-To see all unique authors with open PRs:
-
-```bash
-gh pr list --repo openshift/bpfman-operator --json author | jq -r '.[] | .author.login' | sort | uniq
-```
-
-#### Filtering PRs by content
-
-Find PRs that contain specific patterns in their titles:
-
-```bash
-# Find dependency update PRs
-gh pr list --repo openshift/bpfman-operator --json number,author,title | \
-  jq -r '.[] | select(.title | test("chore\\(deps\\)")) | "\(.number) - \(.author.login) - \(.title)"'
-```
-
-#### Checking PR status and CI jobs
-
-Check CI status for a specific PR:
-
-```bash
-gh pr checks 489 --repo openshift/bpfman-operator
-```
 
 ### Complete workflow example
 
-Here's a complete workflow combining GitHub CLI and autoprat:
+Here's a complete workflow using autoprat:
 
 ```bash
 # 1. Find PRs that need approval
