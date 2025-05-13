@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -o errexit
+set -o nounset
+set -o pipefail
 
 # autoprat — batch-comment PRs with /lgtm, /approve, /ok-to-test,
 # custom comments, or re-trigger commands for failed CI jobs (strips
@@ -23,7 +25,10 @@ execute_if() {
 run() {
     local cmd=("$@")
     echo "+ ${cmd[*]}"
-    [[ "$dry_run" -eq 0 ]] && "${cmd[@]}"
+    if [[ "$dry_run" -eq 0 ]]; then
+        # Run the command and propagate errors
+        "${cmd[@]}" || { echo "Error executing command" >&2; return 1; }
+    fi
 }
 
 get_detailed_pr_data() {
@@ -65,13 +70,13 @@ needs_ok_to_test=0
 usage() {
     cat <<EOF
 Usage:
-  ${0##*/} -r OWNER/REPO [OPTIONS] [PR-NUMBER]
+  ${0##*/} -r OWNER/REPO [OPTIONS] [PR-NUMBER...]
 
 Modes:
   List mode:   use -l/--list to view PRs without taking action
                - Use with PR-NUMBER to show details for a specific PR
                - Use without PR-NUMBER to list all PRs
-  Without -a:  supply a single PR-NUMBER plus any of
+  Without -a:  supply one or more PR-NUMBERs plus any of
                --lgtm, --approve, --ok-to-test, --comment, --job
   With -a:     omit PR-NUMBER and apply to all open PRs
 
@@ -103,6 +108,9 @@ Examples:
   # Single PR: post /retest.
   ${0##*/} -r OWNER/REPO -c /retest 123
 
+  # Multiple PRs: post /retest.
+  ${0##*/} -r OWNER/REPO -c /retest 123 456 789
+
   # All PRs: re-test a specific job.
   ${0##*/} -r OWNER/REPO -a -j ci/prow/test-fmt
 
@@ -131,6 +139,9 @@ Examples:
   # Get detailed information about a specific PR.
   ${0##*/} -r OWNER/REPO --list 488
 
+  # Get detailed information about multiple PRs.
+  ${0##*/} -r OWNER/REPO --list 488 489 490
+
   # List PRs from a specific author.
   ${0##*/} -r OWNER/REPO --list --author "user.*"
 
@@ -158,21 +169,35 @@ pr_has_failed_job() {
 has_label() {
     local pr="$1" label="$2"
 
-    # Always return failure (label not found) in dry-run mode for testing
-    if [[ "$dry_run" -eq 1 ]]; then
-        return 1
-    fi
-
-    gh pr view "$pr" --repo "$repo" \
+    # Check for the specific label
+    local output
+    output=$(gh pr view "$pr" --repo "$repo" \
        --json labels \
-       --jq '.labels[] | select(.name == "'"$label"'")' \
-       >/dev/null
+       --jq '.labels[] | select(.name == "'"$label"'")')
+
+    # Return success (0) if the label was found, failure (1) otherwise
+    [[ -n "$output" ]]
 }
 
 needs_comment() {
     local pr="$1" comment="$2"
     local label="${comment_label_map[$comment]:-}"
-    [[ -z "$label" ]] || ! has_label "$pr" "$label"
+
+    # Return success (0) if we SHOULD post the comment
+    if [[ -z "$label" ]]; then
+        # No label check needed, always post
+        return 0
+    else
+        # If has_label returns success (0), we have the label and should NOT post
+        # If has_label returns failure (1), we don't have the label and should post
+        if has_label "$pr" "$label"; then
+            # Has the label, do NOT post
+            return 1
+        else
+            # Doesn't have the label, DO post
+            return 0
+        fi
+    fi
 }
 
 post_comment() {
@@ -182,7 +207,7 @@ post_comment() {
     if [[ -n "$label" ]]; then
         if ! has_label "$pr" "$label"; then
             echo "    posting $comment"
-            run gh pr comment "$pr" --repo "$repo" --body "$comment"
+            run gh pr comment "$pr" --repo "$repo" --body "$comment" || exit 1
             return 0
         else
             echo "    already has '$label'; skipping $comment"
@@ -190,7 +215,7 @@ post_comment() {
         fi
     else
         echo "    posting $comment"
-        run gh pr comment "$pr" --repo "$repo" --body "$comment"
+        run gh pr comment "$pr" --repo "$repo" --body "$comment" || exit 1
         return 0
     fi
 }
@@ -206,7 +231,7 @@ retrigger_job() {
     fi
 
     echo "    retrigger: $cmd_prefix $arg"
-    run gh pr comment "$pr" --repo "$repo" --body "$cmd_prefix $arg"
+    run gh pr comment "$pr" --repo "$repo" --body "$cmd_prefix $arg" || exit 1
     return 0
 }
 
@@ -338,11 +363,12 @@ main() {
         if [[ "$all_prs" -eq 1 ]]; then
             echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment or --job, or use --list mode" >&2
             exit 1
-        elif [[ "$#" -ne 1 ]]; then
+        elif [[ "$#" -lt 1 ]]; then
             echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment or --job, or use --list mode" >&2
             exit 1
         fi
     fi
+
 
     if [[ "$list_mode" -eq 1 ]]; then
         if [[ "$dry_run" -eq 1 ]]; then
@@ -355,59 +381,61 @@ main() {
             echo ""
         fi
 
-        if [[ "$all_prs" -eq 0 && $# -eq 1 ]]; then
-            pr_number="$1"
-
-            get_detailed_pr_data "$pr_number" "$repo" | \
-                jq -r "
-                    \"#\\(.number) - \\(.author.login) - \\(.title)\" +
-                    \"\\n  State:   \\(.state) | Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d\"))\" +
-                    \"\\n  URL:     \\(.url)\" +
-                    \"\\n  Status:\" +
-                    \"\\n    - Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
-                    \"\\n    - CI: \" + (
-                        if (.statusCheckRollup or .extraStatusChecks) then
-                            (
-                                if (
-                                    (.statusCheckRollup // [] | map(select(.state == \"FAILURE\")) | length > 0) or
-                                    (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
+        if [[ "$all_prs" -eq 0 && $# -gt 0 ]]; then
+            # Handle multiple PR numbers in list mode
+            for pr_number in "$@"; do
+                get_detailed_pr_data "$pr_number" "$repo" | \
+                    jq -r "
+                        \"#\\(.number) - \\(.author.login) - \\(.title)\" +
+                        \"\\n  State:   \\(.state) | Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d\"))\" +
+                        \"\\n  URL:     \\(.url)\" +
+                        \"\\n  Status:\" +
+                        \"\\n    - Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
+                        \"\\n    - CI: \" + (
+                            if (.statusCheckRollup or .extraStatusChecks) then
+                                (
+                                    if (
+                                        (.statusCheckRollup // [] | map(select(.state == \"FAILURE\")) | length > 0) or
+                                        (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
+                                    )
+                                    then \"✗ Failing\"
+                                    else \"✓ Passing\"
+                                    end
                                 )
-                                then \"✗ Failing\"
-                                else \"✓ Passing\"
-                                end
-                            )
-                        else
-                            \"? Unknown\"
-                        end
-                    ) +
-                    \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
-                    \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"✗\" else (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) end) +
-                    \"\\n  Labels:\" +
-                    (if (.labels | length > 0) then
-                        (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
-                    else
-                        \"  None\"
-                    end) +
-                    \"\\n  Checks:\" +
-                    (
-                        [
-                            (.statusCheckRollup // [] | map({context: .context, state: .state})),
-                            (.extraStatusChecks // [])
-                        ] | add |
-                        if length > 0 then
-                            map(
-                                select(.context != null and .context != \"\")
-                            ) |
-                            unique_by(.context) |
-                            sort_by(.context) |
-                            map(
-                                \"\\n    - \" + .context + \": \" + .state
-                            ) | join(\"\")
+                            else
+                                \"? Unknown\"
+                            end
+                        ) +
+                        \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
+                        \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"✗\" else (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) end) +
+                        \"\\n  Labels:\" +
+                        (if (.labels | length > 0) then
+                            (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
                         else
                             \"  None\"
-                        end
-                    )
-                "
+                        end) +
+                        \"\\n  Checks:\" +
+                        (
+                            [
+                                (.statusCheckRollup // [] | map({context: .context, state: .state})),
+                                (.extraStatusChecks // [])
+                            ] | add |
+                            if length > 0 then
+                                map(
+                                    select(.context != null and .context != \"\")
+                                ) |
+                                unique_by(.context) |
+                                sort_by(.context) |
+                                map(
+                                    \"\\n    - \" + .context + \": \" + .state
+                                ) | join(\"\")
+                            else
+                                \"  None\"
+                            end
+                        )
+                    "
+                echo ""
+            done
         else
             all_prs=1
 
@@ -419,7 +447,8 @@ main() {
     if [[ "$all_prs" -eq 1 ]]; then
         [[ $# -ne 0 ]] && usage
     else
-        pr_number="$1"
+        # When not using -a/--all, require at least one PR number
+        [[ $# -lt 1 ]] && usage
 
         if [[ -n "$author" ]]; then
             echo "Warning: --author flag has no effect without -a flag" >&2
@@ -434,24 +463,36 @@ main() {
                     --jq '.[] | [.number, .title, .author.login] | @tsv')
     fi
 
+    # Get list of PRs to process
+    declare -a pr_list=()
+
     if [[ "$all_prs" -eq 1 ]]; then
+        # Get all open PRs
         if [[ -n "$author" ]]; then
-            pr_list=$(gh pr list --repo "$repo" --state open --json number,author \
-                         --jq '.[] | select(.author.login | test("'"$author"'")) | .number')
+            # With author filter
+            mapfile -t pr_list < <(gh pr list --repo "$repo" --state open --json number,author \
+                        --jq '.[] | select(.author.login | test("'"$author"'")) | .number')
         else
-            pr_list=$(gh pr list --repo "$repo" --state open --json number --jq '.[].number')
+            # All PRs
+            mapfile -t pr_list < <(gh pr list --repo "$repo" --state open --json number --jq '.[].number')
         fi
     else
-        pr_list="$pr_number"
+        # Store PR numbers from arguments
+        for arg in "$@"; do
+            pr_list+=("$arg")
+        done
     fi
 
-    while read -r pr; do
-        process_pr "$pr"
-    done <<< "$pr_list"
+    # Process each PR
+    for pr in "${pr_list[@]}"; do
+        process_pr "$pr"  # Fail fast if there's an error
+    done
 }
 
 process_pr() {
     local pr="$1"
+
+    # Skip empty PR numbers
     [[ -z "$pr" ]] && return
 
     if [[ "$show_titles" -eq 1 && -n "${pr_titles[$pr]:-}" ]]; then
@@ -465,10 +506,15 @@ process_pr() {
     fi
 
     local did_any=0
-    post_jobs "$pr"                && did_any=1
+    set +e  # Disable exit on error for these function calls
+    post_jobs "$pr" && did_any=1
     post_labels_and_comments "$pr" && did_any=1
+    set -e  # Re-enable exit on error
 
     [[ "$did_any" -eq 0 ]] && echo "    nothing to do"
+
+    # Always return success from process_pr
+    return 0
 }
 
 main "$@"
