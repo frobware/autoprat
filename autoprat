@@ -66,6 +66,7 @@ list_mode=0
 needs_lgtm=0
 needs_approve=0
 needs_ok_to_test=0
+hold_cancel=0
 
 usage() {
     cat <<EOF
@@ -99,6 +100,7 @@ Options:
   --needs-lgtm            Only show PRs needing LGTM (list mode)
   --needs-approve         Only show PRs needing approval (list mode)
   --needs-ok-to-test      Only show PRs needing ok-to-test (list mode)
+  --hold-cancel           Post /hold cancel on PRs with do-not-merge/hold label
   -h, --help              Show this help
 
 Examples:
@@ -147,6 +149,15 @@ Examples:
 
   # Find PRs needing approval or lgtm.
   ${0##*/} -r OWNER/REPO --list --needs-approve --needs-lgtm
+
+  # Remove hold on a specific PR with do-not-merge/hold label:
+  ${0##*/} -r OWNER/REPO --hold-cancel 123
+
+  # Remove hold on all PRs with do-not-merge/hold label:
+  ${0##*/} -r OWNER/REPO -a --hold-cancel
+
+  # Remove hold on PRs from a specific author:
+  ${0##*/} -r OWNER/REPO -a --author "app/red-hat-konflux" --hold-cancel
 
 EOF
     exit 1
@@ -246,6 +257,9 @@ make_pr_filter() {
     [[ "$needs_ok_to_test" -eq 1 ]] &&
         filter_conditions+=("((.labels | map(.name) | contains([\"needs-ok-to-test\"])) or (.labels | map(.name) | contains([\"ok-to-test\"]) | not))")
 
+    [[ "$hold_cancel" -eq 1 ]] &&
+        filter_conditions+=("(.labels | map(.name) | contains([\"do-not-merge/hold\"]))")
+
     [[ -n "$author" ]] &&
         filter_conditions+=("(.author.login | test(\"$author\"))")
     local jq_filter="."
@@ -311,6 +325,30 @@ post_jobs() {
     (( did > 0 ))
 }
 
+pr_has_hold_label() {
+    local pr="$1"
+
+    # In dry-run mode, check but don't require the label to be present
+    if [[ "$dry_run" -eq 1 ]]; then
+        # Show a message if the label is missing, but still allow testing
+        if ! has_label "$pr" "do-not-merge/hold"; then
+            echo "    no 'do-not-merge/hold' label; would skip in non-dry-run mode"
+        fi
+        return 0
+    fi
+
+    # Check specifically for the do-not-merge/hold label
+    has_label "$pr" "do-not-merge/hold"
+}
+
+post_hold_cancel() {
+    local pr="$1"
+
+    echo "    posting /hold cancel to remove do-not-merge/hold label"
+    run gh pr comment "$pr" --repo "$repo" --body "/hold cancel" || exit 1
+    return 0
+}
+
 post_labels_and_comments() {
     local pr="$1" did=0
     for comment in "${comments[@]}"; do
@@ -325,7 +363,7 @@ post_labels_and_comments() {
 main() {
     local ARGS
     ARGS=$(getopt -o r:c:alnj:x:th \
-                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,help \
+                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
 
@@ -347,6 +385,7 @@ main() {
             --needs-lgtm)        needs_lgtm=1;              shift ;;
             --needs-approve)     needs_approve=1;           shift ;;
             --needs-ok-to-test)  needs_ok_to_test=1;        shift ;;
+            --hold-cancel)       hold_cancel=1;             shift ;;
             -h|--help)           usage ;;
             --)                  shift; break ;;
             *)                   usage ;;
@@ -359,12 +398,12 @@ main() {
         export GH_PAGER=""
     fi
 
-    if [[ "$list_mode" -eq 0 && ${#comments[@]} -eq 0 && ${#jobs[@]} -eq 0 ]]; then
+    if [[ "$list_mode" -eq 0 && ${#comments[@]} -eq 0 && ${#jobs[@]} -eq 0 && "$hold_cancel" -eq 0 ]]; then
         if [[ "$all_prs" -eq 1 ]]; then
-            echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment or --job, or use --list mode" >&2
+            echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment, --job, or --hold-cancel, or use --list mode" >&2
             exit 1
         elif [[ "$#" -lt 1 ]]; then
-            echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment or --job, or use --list mode" >&2
+            echo "Error: specify at least one of --lgtm, --approve, --ok-to-test, --comment, --job, or --hold-cancel, or use --list mode" >&2
             exit 1
         fi
     fi
@@ -509,6 +548,12 @@ process_pr() {
     set +e  # Disable exit on error for these function calls
     post_jobs "$pr" && did_any=1
     post_labels_and_comments "$pr" && did_any=1
+
+    # Handle hold cancel if flag is set
+    if [[ "$hold_cancel" -eq 1 ]]; then
+        execute_if pr_has_hold_label post_hold_cancel "$pr" && did_any=1
+    fi
+
     set -e  # Re-enable exit on error
 
     [[ "$did_any" -eq 0 ]] && echo "    nothing to do"

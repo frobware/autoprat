@@ -180,6 +180,13 @@ autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" --app
   # posts: /retest
   ```
 
+- Remove a hold on a PR with `do-not-merge/hold` label:
+
+  ```bash
+  autoprat -r OWNER/REPO --hold-cancel 123
+  # posts: /hold cancel (only if PR has do-not-merge/hold label)
+  ```
+
 ### Bulk operations (all open PRs)
 
 - Approve, LGTM and OK-to-test every open PR:
@@ -207,6 +214,20 @@ autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" --app
   ```bash
   # Post a retest comment on all PRs from the automation account
   autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" -c "/retest"
+  ```
+
+- Remove holds on all PRs with `do-not-merge/hold` label:
+
+  ```bash
+  # Post /hold cancel on all PRs with the do-not-merge/hold label
+  autoprat -r OWNER/REPO -a --hold-cancel
+  ```
+
+- Remove holds on PRs from a specific author with `do-not-merge/hold` label:
+
+  ```bash
+  # Post /hold cancel on automation account PRs with the do-not-merge/hold label
+  autoprat -r OWNER/REPO -a --author "app/red-hat-konflux" --hold-cancel
   ```
 
 - Re-trigger specific CI jobs for PRs from a specific author:
