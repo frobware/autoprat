@@ -64,10 +64,10 @@ autoprat -r openshift/bpfman-operator --list
 
 Example output:
 ```
-PR URL                                                 CI    APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
-https://github.com/openshift/bpfman-operator/pull/493  PASS  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
-https://github.com/openshift/bpfman-operator/pull/492  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
-https://github.com/openshift/bpfman-operator/pull/491  PASS  Y         N     Y        N     frobware            catalog/index.yaml: drop kube-rbac-proxy relatedImages references
+PR URL                                                 CI      APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
+https://github.com/openshift/bpfman-operator/pull/493  PASS    N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
+https://github.com/openshift/bpfman-operator/pull/492  FAIL    N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
+https://github.com/openshift/bpfman-operator/pull/491  PENDING Y         N     Y        N     frobware            catalog/index.yaml: drop kube-rbac-proxy relatedImages references
 ```
 
 The compact format makes it easy to:
@@ -76,8 +76,12 @@ The compact format makes it easy to:
 - Focus on critical information without scrolling through detailed output
 
 Column descriptions:
-- **PR**: Pull request number
-- **CI**: Continuous Integration status (PASS/FAIL)
+- **PR URL**: Clickable URL to the Pull Request
+- **CI**: Continuous Integration status:
+  - PASS: All CI jobs are passing
+  - PENDING: Some CI jobs are still in progress
+  - FAIL: One or more CI jobs are failing
+  - ?: CI status unknown
 - **APPROVED**: Whether the PR has been approved (Y yes, N no)
 - **LGTM**: Whether the PR has LGTM ("looks good to me") (Y yes, N no)
 - **OK2TEST**: Whether the PR is marked as "ok-to-test" (Y yes, N no)
@@ -127,10 +131,10 @@ Find PRs that need approval or LGTM:
 autoprat -r openshift/bpfman-operator --list --needs-approve
 
 # Example output:
-# PR URL                                                 CI    APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
-# https://github.com/openshift/bpfman-operator/pull/493  PASS  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
-# https://github.com/openshift/bpfman-operator/pull/492  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
-# https://github.com/openshift/bpfman-operator/pull/490  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update registry.access.redhat.com/ubi9/ubi-minimal docker tag to v9.6-1747218906
+# PR URL                                                 CI      APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
+# https://github.com/openshift/bpfman-operator/pull/493  PASS    N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
+# https://github.com/openshift/bpfman-operator/pull/492  FAIL    N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
+# https://github.com/openshift/bpfman-operator/pull/490  PENDING N         N     Y        N     app/red-hat-konflux  chore(deps): update registry.access.redhat.com/ubi9/ubi-minimal docker tag to v9.6-1747218906
 
 # Find PRs that need LGTM (with verbose output)
 autoprat -r openshift/bpfman-operator --list --needs-lgtm --verbose-status

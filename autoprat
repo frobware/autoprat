@@ -291,7 +291,11 @@ format_pr_compact() {
     (if .statusCheckRollup then
         (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
             then \"FAIL\"
-            else \"PASS\"
+            else
+                (if (.statusCheckRollup | map(select(.state == \"PENDING\")) | length > 0)
+                    then \"PENDING\"
+                    else \"PASS\"
+                end)
         end)
     else \"?\" end) +
     \"|\" +
@@ -342,10 +346,14 @@ get_pr_data_verbose() {
             \"\\n    - Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
             \"\\n    - CI: \" + (if .statusCheckRollup then
                 (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
-                 then \"✗ Failing\"
-                 else \"✓ Passing\"
+                 then \"Failing\"
+                 else
+                    (if (.statusCheckRollup | map(select(.state == \"PENDING\")) | length > 0)
+                        then \"Pending\"
+                        else \"Passing\"
+                    end)
                  end)
-             else \"? Unknown\" end) +
+             else \"Unknown\" end) +
             \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
             \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"✗\" else (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) end) +
             \"\\n  Labels:\" +
@@ -522,12 +530,19 @@ main() {
                                         (.statusCheckRollup // [] | map(select(.state == \"FAILURE\")) | length > 0) or
                                         (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
                                     )
-                                    then \"✗ Failing\"
-                                    else \"✓ Passing\"
+                                    then \"Failing\"
+                                    else
+                                        (if (
+                                            (.statusCheckRollup // [] | map(select(.state == \"PENDING\")) | length > 0) or
+                                            (.extraStatusChecks // [] | map(select(.state == \"PENDING\")) | length > 0)
+                                        )
+                                        then \"Pending\"
+                                        else \"Passing\"
+                                        end)
                                     end
                                 )
                             else
-                                \"? Unknown\"
+                                \"Unknown\"
                             end
                         ) +
                         \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
