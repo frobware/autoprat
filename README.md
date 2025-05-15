@@ -65,10 +65,10 @@ autoprat -r openshift/bpfman-operator --list
 Example output:
 ```
 PR | CI | APPROVED LGTM OK2TEST HOLD | AUTHOR              | TITLE
----+----+-------------------------+--------------------+------------------------
-493| ✅ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator
-492| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator-
-491| ✅ | ✓        ✗    ✓       ✗  | frobware             | catalog/index.yaml: drop kube-rbac-proxy
+---+----+-------------------------+--------------------+--------------------------------------
+493| ✅ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator to b154157
+492| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
+491| ✅ | ✓        ✗    ✓       ✗  | frobware             | catalog/index.yaml: drop kube-rbac-proxy relatedImages references
 ```
 
 The compact format makes it easy to:
@@ -127,10 +127,10 @@ autoprat -r openshift/bpfman-operator --list --needs-approve
 
 # Example output:
 # PR | CI | APPROVED LGTM OK2TEST HOLD | AUTHOR              | TITLE
-# ---+----+-------------------------+--------------------+------------------------
-# 493| ✅ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator
-# 492| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator-
-# 490| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update registry.access.redh
+# ---+----+-------------------------+--------------------+--------------------------------------
+# 493| ✅ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator to b154157
+# 492| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
+# 490| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update registry.access.redhat.com/ubi9/ubi-minimal docker tag to v9.6-1747218906
 
 # Find PRs that need LGTM (with verbose output)
 autoprat -r openshift/bpfman-operator --list --needs-lgtm --verbose-status

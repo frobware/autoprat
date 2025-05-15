@@ -281,7 +281,7 @@ make_pr_filter() {
 # Function to print the compact format header
 print_compact_header() {
     printf "PR | CI | APPROVED LGTM OK2TEST HOLD | AUTHOR              | TITLE\n"
-    printf -- "---+----+-------------------------+--------------------+------------------------\n"
+    printf -- "---+----+-------------------------+--------------------+--------------------------------------\n"
 }
 
 # Function to print a PR in compact format
@@ -305,7 +305,7 @@ format_pr_compact() {
     \"  | \" +
     (.author.login | tostring | .[0:20] | if length < 20 then . + (\" \" * (20 - length)) else . end) +
     \" | \" +
-    (.title | .[0:40])"
+    .title"
 }
 
 get_pr_data_compact() {
