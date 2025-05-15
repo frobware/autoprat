@@ -153,10 +153,11 @@ autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" --app
   autoprat -r OWNER/REPO --lgtm --approve 123
   ```
 
-- Grant ok-to-test:
+- Grant ok-to-test (only on PRs with 'needs-ok-to-test' label):
 
   ```bash
   autoprat -r OWNER/REPO --ok-to-test 123
+  # posts: /ok-to-test (only if PR has needs-ok-to-test label)
   ```
 
 - Re-run just the `test-fmt` job:
