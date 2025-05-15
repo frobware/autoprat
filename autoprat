@@ -87,7 +87,7 @@ Options:
   -r, --repo OWNER/REPO   GitHub repo (required)
   -l, --list              List PRs without taking action
   -A, --all               Apply to all open PRs
-  --author PATTERN        Filter PRs by author (regex pattern)
+  -a, --author PATTERN    Filter PRs by author (regex pattern)
   --lgtm                  Add /lgtm (if no 'lgtm' label yet)
   --approve               Add /approve (if no 'approved' label yet)
   --ok-to-test            Add /ok-to-test (only on PRs with 'needs-ok-to-test' label)
@@ -473,7 +473,7 @@ post_labels_and_comments() {
 
 main() {
     local ARGS
-    ARGS=$(getopt -o r:c:Alnj:x:th \
+    ARGS=$(getopt -o r:c:Alna:j:x:th \
                   --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,show-urls,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
@@ -483,7 +483,7 @@ main() {
             -r|--repo)           repo="$2";         shift 2 ;;
             -A|--all)            all_prs=1;         shift ;;
             -l|--list)           list_mode=1;       shift ;;
-            --author)            author="$2";       shift 2 ;;
+            -a|--author)         author="$2";       shift 2 ;;
             --lgtm)              comments+=("/lgtm");       shift ;;
             --approve)           comments+=("/approve");    shift ;;
             --ok-to-test)        comments+=("/ok-to-test"); shift ;;
@@ -612,7 +612,7 @@ main() {
         [[ $# -lt 1 ]] && usage
 
         if [[ -n "$author" ]]; then
-            echo "Warning: --author flag has no effect without -A flag" >&2
+            echo "Warning: -a/--author flag has no effect without -A flag" >&2
         fi
     fi
 
