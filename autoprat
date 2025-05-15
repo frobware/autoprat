@@ -103,7 +103,7 @@ Options:
   --needs-approve         Only show PRs needing approval (list mode)
   --needs-ok-to-test      Only show PRs needing ok-to-test (list mode)
   --hold-cancel           Post /hold cancel on PRs with do-not-merge/hold label
-  --verbose-status        Show detailed PR status (list mode)
+  -v, --verbose-status    Show detailed PR status (list mode)
   -h, --help              Show this help
 
 Examples:
@@ -527,7 +527,7 @@ post_labels_and_comments() {
 
 main() {
     local ARGS
-    ARGS=$(getopt -o r:c:Alna:j:x:th \
+    ARGS=$(getopt -o r:c:Alna:j:x:thv \
                   --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
@@ -551,7 +551,7 @@ main() {
             --needs-approve)     needs_approve=1;           shift ;;
             --needs-ok-to-test)  needs_ok_to_test=1;        shift ;;
             --hold-cancel)       hold_cancel=1;             shift ;;
-            --verbose-status)    verbose_status=1;          shift ;;
+            -v|--verbose-status) verbose_status=1;          shift ;;
             -h|--help)           usage ;;
             --)                  shift; break ;;
             *)                   usage ;;

@@ -89,10 +89,12 @@ Column descriptions:
 
 #### Verbose Format
 
-For detailed PR information, use the `--verbose-status` flag:
+For detailed PR information, use the `-v` or `--verbose-status` flag:
 
 ```bash
 autoprat -r openshift/bpfman-operator --list --verbose-status
+# Or use the shorter form
+autoprat -r openshift/bpfman-operator -l -v
 ```
 
 You can also view specific PRs which are always shown in verbose format:
@@ -148,6 +150,8 @@ autoprat -r openshift/bpfman-operator --list --needs-approve
 
 # Find PRs that need LGTM (with verbose output)
 autoprat -r openshift/bpfman-operator --list --needs-lgtm --verbose-status
+# Or with short options
+autoprat -r openshift/bpfman-operator -l --needs-lgtm -v
 
 # Find PRs needing both approval and LGTM
 autoprat -r openshift/bpfman-operator --list --needs-approve --needs-lgtm
