@@ -79,14 +79,14 @@ Modes:
   List mode:   use -l/--list to view PRs without taking action
                - Use with PR-NUMBER to show details for a specific PR
                - Use without PR-NUMBER to list all PRs
-  Without -a:  supply one or more PR-NUMBERs plus any of
+  Without -A:  supply one or more PR-NUMBERs plus any of
                --lgtm, --approve, --ok-to-test, --comment, --job
-  With -a:     omit PR-NUMBER and apply to all open PRs
+  With -A:     omit PR-NUMBER and apply to all open PRs
 
 Options:
   -r, --repo OWNER/REPO   GitHub repo (required)
   -l, --list              List PRs without taking action
-  -a, --all               Apply to all open PRs
+  -A, --all               Apply to all open PRs
   --author PATTERN        Filter PRs by author (regex pattern)
   --lgtm                  Add /lgtm (if no 'lgtm' label yet)
   --approve               Add /approve (if no 'approved' label yet)
@@ -118,26 +118,26 @@ Examples:
   ${0##*/} -r OWNER/REPO -c /retest 123 456 789
 
   # All PRs: re-test a specific job.
-  ${0##*/} -r OWNER/REPO -a -j ci/prow/test-fmt
+  ${0##*/} -r OWNER/REPO -A -j ci/prow/test-fmt
 
   # All PRs: re-test two jobs, plus a note, dry-run.
-  ${0##*/} -r OWNER/REPO -a -n \
+  ${0##*/} -r OWNER/REPO -A -n \
      -j ci/prow/test-fmt \
      -j ci/prow/security \
      -x /retest \
      -c "please re-run CI"
 
   # Dry-run only ok-to-test on all PRs.
-  ${0##*/} -r OWNER/REPO -a -n --ok-to-test
+  ${0##*/} -r OWNER/REPO -A -n --ok-to-test
 
   # Dry-run only lgtm+approve on all PRs.
-  ${0##*/} -r OWNER/REPO -a -n --lgtm --approve
+  ${0##*/} -r OWNER/REPO -A -n --lgtm --approve
 
   # Approve all PRs from a specific author.
-  ${0##*/} -r OWNER/REPO -a --author "username" --approve
+  ${0##*/} -r OWNER/REPO -A --author "username" --approve
 
   # Filter PRs by author regex pattern.
-  ${0##*/} -r OWNER/REPO -a --author "user.*" --lgtm
+  ${0##*/} -r OWNER/REPO -A --author "user.*" --lgtm
 
   # List all PRs in a repository with compact view (default).
   ${0##*/} -r OWNER/REPO --list
@@ -164,10 +164,10 @@ Examples:
   ${0##*/} -r OWNER/REPO --hold-cancel 123
 
   # Remove hold on all PRs with do-not-merge/hold label:
-  ${0##*/} -r OWNER/REPO -a --hold-cancel
+  ${0##*/} -r OWNER/REPO -A --hold-cancel
 
   # Remove hold on PRs from a specific author:
-  ${0##*/} -r OWNER/REPO -a --author "app/red-hat-konflux" --hold-cancel
+  ${0##*/} -r OWNER/REPO -A --author "app/red-hat-konflux" --hold-cancel
 
 EOF
     exit 1
@@ -473,7 +473,7 @@ post_labels_and_comments() {
 
 main() {
     local ARGS
-    ARGS=$(getopt -o r:c:alnj:x:th \
+    ARGS=$(getopt -o r:c:Alnj:x:th \
                   --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,show-urls,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
@@ -481,7 +481,7 @@ main() {
     while true; do
         case "$1" in
             -r|--repo)           repo="$2";         shift 2 ;;
-            -a|--all)            all_prs=1;         shift ;;
+            -A|--all)            all_prs=1;         shift ;;
             -l|--list)           list_mode=1;       shift ;;
             --author)            author="$2";       shift 2 ;;
             --lgtm)              comments+=("/lgtm");       shift ;;
@@ -608,11 +608,11 @@ main() {
     if [[ "$all_prs" -eq 1 ]]; then
         [[ $# -ne 0 ]] && usage
     else
-        # When not using -a/--all, require at least one PR number
+        # When not using -A/--all, require at least one PR number
         [[ $# -lt 1 ]] && usage
 
         if [[ -n "$author" ]]; then
-            echo "Warning: --author flag has no effect without -a flag" >&2
+            echo "Warning: --author flag has no effect without -A flag" >&2
         fi
     fi
 
