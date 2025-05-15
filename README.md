@@ -47,15 +47,52 @@ You are tired of:
 
 **autoprat** includes a built-in list mode that makes it easy to explore PRs before taking action. Use the `--list` option to see what PRs are available and which ones need attention.
 
-### Basic listing with autoprat
+### Viewing PRs: Compact vs. Verbose Format
 
-List all open PRs in a repository:
+autoprat offers two different formats for viewing PRs:
+
+1. **Compact Format** (default): Shows PRs in a tabular format with key status indicators
+2. **Verbose Format**: Shows detailed information for each PR
+
+#### Compact Format
+
+By default, `--list` shows PRs in a compact tabular format for quick scanning:
 
 ```bash
 autoprat -r openshift/bpfman-operator --list
 ```
 
-Get detailed information about a specific PR:
+Example output:
+```
+PR | CI | APPROVED LGTM OK2TEST HOLD | AUTHOR              | TITLE
+---+----+-------------------------+--------------------+------------------------
+493| ✅ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator
+492| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator-
+491| ✅ | ✓        ✗    ✓       ✗  | frobware             | catalog/index.yaml: drop kube-rbac-proxy
+```
+
+The compact format makes it easy to:
+- Quickly scan PR statuses across multiple dimensions
+- Identify PRs that need attention
+- Focus on critical information without scrolling through detailed output
+
+Column descriptions:
+- **PR**: Pull request number
+- **CI**: Continuous Integration status (✅ passing, ❌ failing)
+- **APPROVED**: Whether the PR has been approved (✓ yes, ✗ no)
+- **LGTM**: Whether the PR has LGTM ("looks good to me") (✓ yes, ✗ no)
+- **OK2TEST**: Whether the PR is marked as "ok-to-test" (✓ yes, ✗ no)
+- **HOLD**: Whether the PR has a "do-not-merge/hold" label (✓ yes, ✗ no)
+
+#### Verbose Format
+
+For detailed PR information, use the `--verbose-status` flag:
+
+```bash
+autoprat -r openshift/bpfman-operator --list --verbose-status
+```
+
+Or view a specific PR (always shown in verbose format):
 
 ```bash
 autoprat -r openshift/bpfman-operator --list 488
@@ -85,13 +122,20 @@ Example output:
 Find PRs that need approval or LGTM:
 
 ```bash
-# Find PRs that need approval
+# Find PRs that need approval (compact format)
 autoprat -r openshift/bpfman-operator --list --needs-approve
 
-# Find PRs that need LGTM
-autoprat -r openshift/bpfman-operator --list --needs-lgtm
+# Example output:
+# PR | CI | APPROVED LGTM OK2TEST HOLD | AUTHOR              | TITLE
+# ---+----+-------------------------+--------------------+------------------------
+# 493| ✅ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator
+# 492| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator-
+# 490| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update registry.access.redh
 
-# Find PRs needing both
+# Find PRs that need LGTM (with verbose output)
+autoprat -r openshift/bpfman-operator --list --needs-lgtm --verbose-status
+
+# Find PRs needing both approval and LGTM
 autoprat -r openshift/bpfman-operator --list --needs-approve --needs-lgtm
 ```
 

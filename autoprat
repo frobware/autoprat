@@ -67,6 +67,7 @@ needs_lgtm=0
 needs_approve=0
 needs_ok_to_test=0
 hold_cancel=0
+verbose_status=0     # default to compact format
 
 usage() {
     cat <<EOF
@@ -101,6 +102,7 @@ Options:
   --needs-approve         Only show PRs needing approval (list mode)
   --needs-ok-to-test      Only show PRs needing ok-to-test (list mode)
   --hold-cancel           Post /hold cancel on PRs with do-not-merge/hold label
+  --verbose-status        Show detailed PR status (list mode)
   -h, --help              Show this help
 
 Examples:
@@ -135,8 +137,11 @@ Examples:
   # Filter PRs by author regex pattern.
   ${0##*/} -r OWNER/REPO -a --author "user.*" --lgtm
 
-  # List all PRs in a repository.
+  # List all PRs in a repository with compact view (default).
   ${0##*/} -r OWNER/REPO --list
+
+  # List all PRs in a repository with detailed view.
+  ${0##*/} -r OWNER/REPO --list --verbose-status
 
   # Get detailed information about a specific PR.
   ${0##*/} -r OWNER/REPO --list 488
@@ -273,7 +278,48 @@ make_pr_filter() {
     echo "$jq_filter"
 }
 
-get_pr_data() {
+# Function to print the compact format header
+print_compact_header() {
+    printf "PR | CI | APPROVED LGTM OK2TEST HOLD | AUTHOR              | TITLE\n"
+    printf -- "---+----+-------------------------+--------------------+------------------------\n"
+}
+
+# Function to print a PR in compact format
+format_pr_compact() {
+    jq -r "
+    \"\\(.number)| \" +
+    (if .statusCheckRollup then
+        (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
+            then \"❌\"
+            else \"✅\"
+        end)
+    else \"❓\" end) +
+    \" | \" +
+    (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
+    \"        \" +
+    (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
+    \"    \" +
+    (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) +
+    \"       \" +
+    (if (.labels | map(.name) | contains([\"do-not-merge/hold\"])) then \"✓\" else \"✗\" end) +
+    \"  | \" +
+    (.author.login | tostring | .[0:20] | if length < 20 then . + (\" \" * (20 - length)) else . end) +
+    \" | \" +
+    (.title | .[0:40])"
+}
+
+get_pr_data_compact() {
+    local fields="number,title,author,url,createdAt,labels,statusCheckRollup,state"
+    local filter
+    filter=$(make_pr_filter)
+
+    print_compact_header
+
+    gh pr list --repo "$repo" --state open --json "$fields" \
+       --jq ".[] | $filter" | format_pr_compact
+}
+
+get_pr_data_verbose() {
     local fields="number,title,author,url,createdAt,labels,statusCheckRollup,state"
     local filter
     filter=$(make_pr_filter)
@@ -387,7 +433,7 @@ post_labels_and_comments() {
 main() {
     local ARGS
     ARGS=$(getopt -o r:c:alnj:x:th \
-                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,help \
+                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
 
@@ -410,6 +456,7 @@ main() {
             --needs-approve)     needs_approve=1;           shift ;;
             --needs-ok-to-test)  needs_ok_to_test=1;        shift ;;
             --hold-cancel)       hold_cancel=1;             shift ;;
+            --verbose-status)    verbose_status=1;          shift ;;
             -h|--help)           usage ;;
             --)                  shift; break ;;
             *)                   usage ;;
@@ -441,10 +488,14 @@ main() {
             echo "  Needs LGTM: $needs_lgtm"
             echo "  Needs approval: $needs_approve"
             echo "  Needs ok-to-test: $needs_ok_to_test"
+            echo "  Output format: $([ "$verbose_status" -eq 1 ] && echo "verbose" || echo "compact")"
             echo ""
         fi
 
         if [[ "$all_prs" -eq 0 && $# -gt 0 ]]; then
+            # Force verbose mode for individual PRs
+            verbose_status=1
+
             # Handle multiple PR numbers in list mode
             for pr_number in "$@"; do
                 get_detailed_pr_data "$pr_number" "$repo" | \
@@ -502,7 +553,11 @@ main() {
         else
             all_prs=1
 
-            get_pr_data
+            if [[ "$verbose_status" -eq 1 ]]; then
+                get_pr_data_verbose
+            else
+                get_pr_data_compact
+            fi
         fi
         exit 0
     fi
