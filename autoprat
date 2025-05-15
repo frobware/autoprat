@@ -284,6 +284,67 @@ print_compact_header() {
     echo "PR URL|CI|APPROVED|LGTM|OK2TEST|HOLD|AUTHOR|TITLE"
 }
 
+# Function to format PR data as tree format
+format_pr_tree_data() {
+    jq -r "
+    \"1|0|\\(.url)\\n\" +
+    \"2|1|Title: \\(.title) (\\(.author.login))\\n\" +
+    \"3|1|PR #\\(.number)\\n\" +
+    \"4|1|State: \\(.state)\\n\" +
+    \"5|1|Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d %H:%M:%S\"))\\n\" +
+    \"6|1|Status\\n\" +
+    \"7|6|Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"Yes\" else \"No\" end) + \"\\n\" +
+    \"8|6|CI: \" + (
+        if (.statusCheckRollup or .extraStatusChecks) then
+            (
+                if (
+                    (.statusCheckRollup // [] | map(select(.state == \"FAILURE\")) | length > 0) or
+                    (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
+                )
+                then \"Failing\"
+                else
+                    (if (
+                        (.statusCheckRollup // [] | map(select(.state == \"PENDING\")) | length > 0) or
+                        (.extraStatusChecks // [] | map(select(.state == \"PENDING\")) | length > 0)
+                    )
+                    then \"Pending\"
+                    else \"Passing\"
+                    end)
+                end
+            )
+        else
+            \"Unknown\"
+        end
+    ) + \"\\n\" +
+    \"9|6|LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"Yes\" else \"No\" end) + \"\\n\" +
+    \"10|6|OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"No\" else (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"Yes\" else \"No\" end) end) + \"\\n\" +
+    \"20|1|Labels\" +
+    (if (.labels | length > 0) then
+        (.labels | sort_by(.name) | to_entries | map(\"\\n\" + (21 + .key | tostring) + \"|20|\" + .value.name) | join(\"\"))
+    else
+        \"\\n21|20|None\"
+    end) + \"\\n\" +
+    \"100|1|Checks\" +
+    (
+        [
+            (.statusCheckRollup // [] | map({context: .context, state: .state})),
+            (.extraStatusChecks // [])
+        ] | add |
+        if length > 0 then
+            map(
+                select(.context != null and .context != \"\")
+            ) |
+            unique_by(.context) |
+            sort_by(.context) |
+            to_entries |
+            map(\"\\n\" + (101 + .key | tostring) + \"|100|\" + .value.context + \": \" + .value.state) |
+            join(\"\")
+        else
+            \"\\n101|100|None\"
+        end
+    )"
+}
+
 # Function to print a PR in compact format
 format_pr_compact() {
     jq -r "
@@ -338,42 +399,58 @@ get_pr_data_verbose() {
     local filter
     filter=$(make_pr_filter)
 
+    # Get all matching PR numbers first
+    local pr_numbers_file
+    pr_numbers_file=$(mktemp)
     gh pr list --repo "$repo" --state open --json "$fields" \
-       --jq ".[] | $filter | \"#\\(.number) - \\(.author.login) - \\(.title)\" +
-            \"\\n  State:   \\(.state) | Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d\"))\" +
-            \"\\n  URL:     \\(.url)\" +
-            \"\\n  Status:\" +
-            \"\\n    - Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
-            \"\\n    - CI: \" + (if .statusCheckRollup then
-                (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
-                 then \"Failing\"
-                 else
-                    (if (.statusCheckRollup | map(select(.state == \"PENDING\")) | length > 0)
-                        then \"Pending\"
-                        else \"Passing\"
-                    end)
-                 end)
-             else \"Unknown\" end) +
-            \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
-            \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"✗\" else (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) end) +
-            \"\\n  Labels:\" +
-            (if (.labels | length > 0) then
-                (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
-             else
-                \"  None\"
-             end) +
-            \"\\n  Checks:\" +
-            (.statusCheckRollup |
-                if . then
-                    map(
-                        select(.context != null and .context != \"\")
-                    ) | sort_by(.context) | map(
-                        \"\\n    - \" + .context + \": \" + .state
-                    ) | join(\"\")
-                else
-                    \"  None\"
-                end
-            )"
+       --jq ".[] | $filter | .number" > "$pr_numbers_file" 2>/dev/null || true
+
+    # If we're in dry run mode and there are no PRs matching the filter, provide an example
+    if [[ "$dry_run" -eq 1 ]] && [[ ! -s "$pr_numbers_file" ]]; then
+        echo "Note: No PRs match your filter criteria in dry-run mode. Using example PR format:"
+        echo ""
+        echo "PR #123: Example PR Title (example-user)"
+        echo "├─State: OPEN | Created: 2025-01-01"
+        echo "├─URL: https://github.com/example/repo/pull/123"
+        echo "├─Status"
+        echo "│ ├─Approved: No"
+        echo "│ ├─CI: Pending"
+        echo "│ ├─LGTM: No"
+        echo "│ └─OK-to-test: Yes"
+        echo "├─Labels"
+        echo "│ ├─needs-ok-to-test"
+        echo "│ └─size/S"
+        echo "└─Checks"
+        echo "  ├─ci/prow/verify: PENDING"
+        echo "  └─tide: PENDING"
+        echo ""
+        rm -f "$pr_numbers_file"
+        return
+    fi
+
+    # Process each PR separately to handle extraStatusChecks properly
+    while read -r pr_number; do
+        # Skip empty lines
+        [[ -z "$pr_number" ]] && continue
+
+        # Process each PR like we do in individual PR mode
+        local tempfile
+        tempfile=$(mktemp)
+
+        get_detailed_pr_data "$pr_number" "$repo" | \
+            format_pr_tree_data > "$tempfile"
+
+        # Use column to format the output as a tree, hiding the ID columns
+        column --separator "|" --tree-id 1 --tree-parent 2 --tree 3 --output-width $(tput cols) --table-hide 1,2 "$tempfile"
+
+        # Remove the temporary file
+        rm -f "$tempfile"
+
+        echo ""
+    done < "$pr_numbers_file"
+
+    # Clean up
+    rm -f "$pr_numbers_file"
 }
 
 post_jobs() {
@@ -499,8 +576,9 @@ main() {
 
 
     if [[ "$list_mode" -eq 1 ]]; then
+        # Only show configuration in list mode when in dry-run mode
         if [[ "$dry_run" -eq 1 ]]; then
-            echo "List mode configuration:"
+            echo "List mode configuration (dry-run):"
             echo "  Repository: $repo"
             echo "  Author filter: ${author:-none}"
             echo "  Needs LGTM: $needs_lgtm"
@@ -516,63 +594,19 @@ main() {
 
             # Handle multiple PR numbers in list mode
             for pr_number in "$@"; do
+                # Create a temporary file for the tree data
+                local tempfile
+                tempfile=$(mktemp)
+
                 get_detailed_pr_data "$pr_number" "$repo" | \
-                    jq -r "
-                        \"#\\(.number) - \\(.author.login) - \\(.title)\" +
-                        \"\\n  State:   \\(.state) | Created: \\(.createdAt | fromdate | strftime(\"%Y-%m-%d\"))\" +
-                        \"\\n  URL:     \\(.url)\" +
-                        \"\\n  Status:\" +
-                        \"\\n    - Approved: \" + (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
-                        \"\\n    - CI: \" + (
-                            if (.statusCheckRollup or .extraStatusChecks) then
-                                (
-                                    if (
-                                        (.statusCheckRollup // [] | map(select(.state == \"FAILURE\")) | length > 0) or
-                                        (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
-                                    )
-                                    then \"Failing\"
-                                    else
-                                        (if (
-                                            (.statusCheckRollup // [] | map(select(.state == \"PENDING\")) | length > 0) or
-                                            (.extraStatusChecks // [] | map(select(.state == \"PENDING\")) | length > 0)
-                                        )
-                                        then \"Pending\"
-                                        else \"Passing\"
-                                        end)
-                                    end
-                                )
-                            else
-                                \"Unknown\"
-                            end
-                        ) +
-                        \"\\n    - LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
-                        \"\\n    - OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"✗\" else (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) end) +
-                        \"\\n  Labels:\" +
-                        (if (.labels | length > 0) then
-                            (.labels | sort_by(.name) | map(\"\\n    - \" + .name) | join(\"\"))
-                        else
-                            \"  None\"
-                        end) +
-                        \"\\n  Checks:\" +
-                        (
-                            [
-                                (.statusCheckRollup // [] | map({context: .context, state: .state})),
-                                (.extraStatusChecks // [])
-                            ] | add |
-                            if length > 0 then
-                                map(
-                                    select(.context != null and .context != \"\")
-                                ) |
-                                unique_by(.context) |
-                                sort_by(.context) |
-                                map(
-                                    \"\\n    - \" + .context + \": \" + .state
-                                ) | join(\"\")
-                            else
-                                \"  None\"
-                            end
-                        )
-                    "
+                    format_pr_tree_data > "$tempfile"
+
+                # Use column to format the output as a tree, hiding the ID columns
+                column --separator "|" --tree-id 1 --tree-parent 2 --tree 3 --output-width $(tput cols) --table-hide 1,2 "$tempfile"
+
+                # Remove the temporary file
+                rm -f "$tempfile"
+
                 echo ""
             done
         else

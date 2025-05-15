@@ -95,32 +95,42 @@ For detailed PR information, use the `--verbose-status` flag:
 autoprat -r openshift/bpfman-operator --list --verbose-status
 ```
 
-The compact format includes clickable URLs so you can easily open PRs in your browser by clicking on them.
-
-Or view a specific PR (always shown in verbose format):
+You can also view specific PRs which are always shown in verbose format:
 
 ```bash
 autoprat -r openshift/bpfman-operator --list 488
 ```
 
-Example output:
+The verbose format organizes information in a tree structure that makes it easy to navigate:
+
 ```
-#489 - app/red-hat-konflux - chore(deps): update ocp-bpfman-operator to 65b0d10
-  State:   OPEN | Created: 2025-05-12
-  URL:     https://github.com/openshift/bpfman-operator/pull/489
-  Status:
-    - Approved: ✗
-    - CI: ✗ Failing
-    - LGTM: ✗
-    - OK-to-test: ✓
-  Labels:
-    - konflux-nudge
-    - needs-ok-to-test
-  Checks:
-    - Red Hat Konflux / bpfman-operator-bundle-on-pull-request: SUCCESS
-    - Red Hat Konflux / bpfman-operator-enterprise-contract / ocp-bpfman-operator-bundle: FAILURE
-    - tide: PENDING
+https://github.com/openshift/bpfman-operator/pull/489
+├─Title: chore(deps): update ocp-bpfman-operator to 65b0d10 (app/red-hat-konflux)
+├─PR #489
+├─State: OPEN
+├─Created: 2025-05-12 14:59:30
+├─Status
+│ ├─Approved: No
+│ ├─CI: Failing
+│ ├─LGTM: No
+│ └─OK-to-test: Yes
+├─Labels
+│ ├─konflux-nudge
+│ └─needs-ok-to-test
+└─Checks
+  ├─Red Hat Konflux / bpfman-operator-bundle-on-pull-request: SUCCESS
+  ├─Red Hat Konflux / bpfman-operator-enterprise-contract / ocp-bpfman-operator-bundle: FAILURE
+  └─tide: PENDING
 ```
+
+The tree format provides:
+- Hierarchical organization of PR information
+- Visual indentation to group related information
+- Complete CI check details with their status
+- All PR labels clearly visible
+- Status indicators for LGTM, Approval, CI, and OK-to-test
+
+Both formats include clickable URLs so you can easily open PRs in your browser.
 
 ### Finding PRs that need attention
 
