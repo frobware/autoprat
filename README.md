@@ -185,11 +185,18 @@ autoprat -r openshift/bpfman-operator --list --failing-ci
 # Or with short options
 autoprat -r openshift/bpfman-operator -l -f
 
-# Pipe failing PR numbers directly to another autoprat command (with dry-run first)
+# Method 1: Pipe failing PR numbers directly using command substitution (with dry-run first)
 autoprat -r openshift/bpfman-operator -n -c "/retest" $(autoprat -r openshift/bpfman-operator -l -f)
 
+# Method 2: Direct pipeline using stdin (NEW and recommended)
+autoprat -r openshift/bpfman-operator -l -f | autoprat -r openshift/bpfman-operator -n -c "/retest"
+
+# Method 3: Using the general PR numbers option with any filter
+# Get numbers of all PRs needing LGTM and retest them
+autoprat -r openshift/bpfman-operator -l --needs-lgtm -p | autoprat -r openshift/bpfman-operator -n -c "/retest"
+
 # When ready, remove the -n flag to actually post the comments
-# autoprat -r openshift/bpfman-operator -c "/retest" $(autoprat -r openshift/bpfman-operator -l -f)
+# autoprat -r openshift/bpfman-operator -l -f | autoprat -r openshift/bpfman-operator -c "/retest"
 ```
 
 
@@ -329,6 +336,32 @@ autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" --app
     --author "app/red-hat-konflux" \
     --ok-to-test
   ```
+
+### Pipeline Examples
+
+Using the pipeline feature, you can create powerful chains of autoprat commands:
+
+```bash
+# Retry all failing CI jobs from a specific author
+autoprat -r openshift/bpfman-operator -l -f --author "app/red-hat-konflux" | \
+  autoprat -r openshift/bpfman-operator -c "/retest"
+
+# LGTM and approve all PRs that need approval, without affecting PRs already approved
+autoprat -r openshift/bpfman-operator -l --needs-approve | \
+  autoprat -r openshift/bpfman-operator --lgtm --approve
+
+# Find all PRs with failing CI and add a specific comment to them
+autoprat -r openshift/bpfman-operator -l -f | \
+  autoprat -r openshift/bpfman-operator -c "Investigating failing tests..."
+
+# Find any PRs from a specific author and approve them
+autoprat -r openshift/bpfman-operator -l --author "app/dependabot" -p | \
+  autoprat -r openshift/bpfman-operator --approve -n
+
+# Find all PRs needing both LGTM and approval and add both
+autoprat -r openshift/bpfman-operator -l --needs-lgtm --needs-approve -p | \
+  autoprat -r openshift/bpfman-operator --lgtm --approve -n
+```
 
 ---
 

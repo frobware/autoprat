@@ -8,6 +8,42 @@ set -o pipefail
 # custom comments, or re-trigger commands for failed CI jobs (strips
 # path prefixes for /test and /retest).
 
+# Check if this is a non-interactive session (being piped to)
+if [[ ! -t 0 ]]; then
+    # Check if any arguments look like PR numbers
+    has_pr_numbers=0
+    for arg in "$@"; do
+        if [[ "$arg" =~ ^[0-9]+$ ]]; then
+            has_pr_numbers=1
+            break
+        fi
+    done
+
+    # If no PR numbers provided in the arguments, read them from stdin
+    if [[ $has_pr_numbers -eq 0 ]]; then
+        # Capture stdin as PR numbers
+        pr_numbers=()
+        while IFS= read -r line; do
+            # Skip empty lines and non-numeric input
+            if [[ -n "$line" && "$line" =~ ^[0-9]+$ ]]; then
+                pr_numbers+=("$line")
+            fi
+        done
+
+        # If we got PR numbers, execute the same command with them added
+        if [[ ${#pr_numbers[@]} -gt 0 ]]; then
+            exec "$0" "$@" "${pr_numbers[@]}"
+        fi
+
+        # If we got here, either there were no valid PR numbers or exec failed
+        if [[ ${#pr_numbers[@]} -eq 0 ]]; then
+            echo "Error: No valid PR numbers provided via stdin" >&2
+            exit 1
+        fi
+        exit 1  # Should not reach here
+    fi
+fi
+
 # Higher-order function for conditional actions
 execute_if() {
     local condition_func="$1"
@@ -69,6 +105,7 @@ needs_ok_to_test=0
 hold_cancel=0
 verbose_status=0     # default to compact format
 failing_ci=0         # option to list only failing CI PRs
+numbers_only=0       # option to list only PR numbers (for piping)
 # Always show clickable URLs in the compact format
 
 usage() {
@@ -106,6 +143,7 @@ Options:
   --hold-cancel           Post /hold cancel on PRs with do-not-merge/hold label
   -v, --verbose-status    Show detailed PR status (list mode)
   -f, --failing-ci        Only show PR numbers with failing CI (useful for piping)
+  -p, --numbers           Output only PR numbers (useful for piping with any filter)
   -h, --help              Show this help
 
 Examples:
@@ -532,8 +570,8 @@ post_labels_and_comments() {
 
 main() {
     local ARGS
-    ARGS=$(getopt -o r:c:Alna:j:x:thvf \
-                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,failing-ci,help \
+    ARGS=$(getopt -o r:c:Alna:j:x:thvfp \
+                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,failing-ci,numbers,pr-numbers,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
 
@@ -558,6 +596,7 @@ main() {
             --hold-cancel)       hold_cancel=1;             shift ;;
             -v|--verbose-status) verbose_status=1;          shift ;;
             -f|--failing-ci) failing_ci=1;           shift ;;
+            -p|--numbers|--pr-numbers) numbers_only=1;       shift ;;
             -h|--help)           usage ;;
             --)                  shift; break ;;
             *)                   usage ;;
@@ -582,10 +621,10 @@ main() {
 
 
     if [[ "$list_mode" -eq 1 ]]; then
-        # Handle failing CI option specially - only output PR numbers
-        if [[ "$failing_ci" -eq 1 ]]; then
-            # Get PR numbers with failing CI for use in piping
-            local fields="number,statusCheckRollup"
+        # Handle PR numbers-only output mode
+        if [[ "$numbers_only" -eq 1 || "$failing_ci" -eq 1 ]]; then
+            # Get PR numbers for use in piping
+            local fields="number,title,author,url,createdAt,labels,statusCheckRollup,state"
             local filter
             filter=$(make_pr_filter)
             gh pr list --repo "$repo" --state open --json "$fields" \
