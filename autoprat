@@ -280,8 +280,8 @@ make_pr_filter() {
 
 # Function to print the compact format header
 print_compact_header() {
-    printf "PR | CI | APPROVED LGTM OK2TEST HOLD | AUTHOR              | TITLE\n"
-    printf -- "---+----+-------------------------+--------------------+--------------------------------------\n"
+    printf "PR | CI   | APPROVED LGTM OK2TEST HOLD | AUTHOR                          | TITLE\n"
+    printf -- "---+------+----------------------------+---------------------------------+---------------------------------------\n"
 }
 
 # Function to print a PR in compact format
@@ -290,20 +290,20 @@ format_pr_compact() {
     \"\\(.number)| \" +
     (if .statusCheckRollup then
         (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
-            then \"❌\"
-            else \"✅\"
+            then \"FAIL\"
+            else \"PASS\"
         end)
-    else \"❓\" end) +
+    else \"?\" end) +
     \" | \" +
-    (if (.labels | map(.name) | contains([\"approved\"])) then \"✓\" else \"✗\" end) +
+    (if (.labels | map(.name) | contains([\"approved\"])) then \"Y\" else \"N\" end) +
     \"        \" +
-    (if (.labels | map(.name) | contains([\"lgtm\"])) then \"✓\" else \"✗\" end) +
+    (if (.labels | map(.name) | contains([\"lgtm\"])) then \"Y\" else \"N\" end) +
     \"    \" +
-    (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"✓\" else \"✗\" end) +
+    (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"Y\" else \"N\" end) +
     \"       \" +
-    (if (.labels | map(.name) | contains([\"do-not-merge/hold\"])) then \"✓\" else \"✗\" end) +
-    \"  | \" +
-    (.author.login | tostring | .[0:20] | if length < 20 then . + (\" \" * (20 - length)) else . end) +
+    (if (.labels | map(.name) | contains([\"do-not-merge/hold\"])) then \"Y\" else \"N\" end) +
+    \"    | \" +
+    (.author.login | tostring | .[0:30] | if length < 30 then . + (\" \" * (30 - length + 1)) else . + \" \" end) +
     \" | \" +
     .title"
 }

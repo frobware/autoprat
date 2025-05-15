@@ -64,11 +64,11 @@ autoprat -r openshift/bpfman-operator --list
 
 Example output:
 ```
-PR | CI | APPROVED LGTM OK2TEST HOLD | AUTHOR              | TITLE
----+----+-------------------------+--------------------+--------------------------------------
-493| ✅ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator to b154157
-492| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
-491| ✅ | ✓        ✗    ✓       ✗  | frobware             | catalog/index.yaml: drop kube-rbac-proxy relatedImages references
+PR | CI   | APPROVED LGTM OK2TEST HOLD | AUTHOR                          | TITLE
+---+------+----------------------------+---------------------------------+---------------------------------------
+493| PASS | N        N    Y       N    | app/red-hat-konflux             | chore(deps): update ocp-bpfman-operator to b154157
+492| FAIL | N        N    Y       N    | app/red-hat-konflux             | chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
+491| PASS | Y        N    Y       N    | frobware                        | catalog/index.yaml: drop kube-rbac-proxy relatedImages references
 ```
 
 The compact format makes it easy to:
@@ -78,11 +78,11 @@ The compact format makes it easy to:
 
 Column descriptions:
 - **PR**: Pull request number
-- **CI**: Continuous Integration status (✅ passing, ❌ failing)
-- **APPROVED**: Whether the PR has been approved (✓ yes, ✗ no)
-- **LGTM**: Whether the PR has LGTM ("looks good to me") (✓ yes, ✗ no)
-- **OK2TEST**: Whether the PR is marked as "ok-to-test" (✓ yes, ✗ no)
-- **HOLD**: Whether the PR has a "do-not-merge/hold" label (✓ yes, ✗ no)
+- **CI**: Continuous Integration status (PASS/FAIL)
+- **APPROVED**: Whether the PR has been approved (Y yes, N no)
+- **LGTM**: Whether the PR has LGTM ("looks good to me") (Y yes, N no)
+- **OK2TEST**: Whether the PR is marked as "ok-to-test" (Y yes, N no)
+- **HOLD**: Whether the PR has a "do-not-merge/hold" label (Y yes, N no)
 
 #### Verbose Format
 
@@ -126,11 +126,11 @@ Find PRs that need approval or LGTM:
 autoprat -r openshift/bpfman-operator --list --needs-approve
 
 # Example output:
-# PR | CI | APPROVED LGTM OK2TEST HOLD | AUTHOR              | TITLE
-# ---+----+-------------------------+--------------------+--------------------------------------
-# 493| ✅ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator to b154157
-# 492| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
-# 490| ❌ | ✗        ✗    ✓       ✗  | app/red-hat-konflux  | chore(deps): update registry.access.redhat.com/ubi9/ubi-minimal docker tag to v9.6-1747218906
+# PR | CI   | APPROVED LGTM OK2TEST HOLD | AUTHOR                          | TITLE
+# ---+------+----------------------------+---------------------------------+---------------------------------------
+# 493| PASS | N        N    Y       N    | app/red-hat-konflux             | chore(deps): update ocp-bpfman-operator to b154157
+# 492| FAIL | N        N    Y       N    | app/red-hat-konflux             | chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
+# 490| FAIL | N        N    Y       N    | app/red-hat-konflux             | chore(deps): update registry.access.redhat.com/ubi9/ubi-minimal docker tag to v9.6-1747218906
 
 # Find PRs that need LGTM (with verbose output)
 autoprat -r openshift/bpfman-operator --list --needs-lgtm --verbose-status
