@@ -68,7 +68,7 @@ needs_approve=0
 needs_ok_to_test=0
 hold_cancel=0
 verbose_status=0     # default to compact format
-show_urls=0          # show clickable URLs instead of PR numbers
+# Always show clickable URLs in the compact format
 
 usage() {
     cat <<EOF
@@ -104,7 +104,6 @@ Options:
   --needs-ok-to-test      Only show PRs needing ok-to-test (list mode)
   --hold-cancel           Post /hold cancel on PRs with do-not-merge/hold label
   --verbose-status        Show detailed PR status (list mode)
-  --show-urls             Show clickable URLs instead of PR numbers (list mode)
   -h, --help              Show this help
 
 Examples:
@@ -144,9 +143,6 @@ Examples:
 
   # List all PRs in a repository with detailed view.
   ${0##*/} -r OWNER/REPO --list --verbose-status
-
-  # Show PRs with clickable URLs instead of PR numbers.
-  ${0##*/} -r OWNER/REPO --list --show-urls
 
   # Get detailed information about a specific PR.
   ${0##*/} -r OWNER/REPO --list 488
@@ -285,58 +281,31 @@ make_pr_filter() {
 
 # Function to print the compact format header
 print_compact_header() {
-    if [[ "$show_urls" -eq 1 ]]; then
-        echo "PR URL|CI|APPROVED|LGTM|OK2TEST|HOLD|AUTHOR|TITLE"
-    else
-        echo "PR|CI|APPROVED|LGTM|OK2TEST|HOLD|AUTHOR|TITLE"
-    fi
+    echo "PR URL|CI|APPROVED|LGTM|OK2TEST|HOLD|AUTHOR|TITLE"
 }
 
 # Function to print a PR in compact format
 format_pr_compact() {
-    if [[ "$show_urls" -eq 1 ]]; then
-        jq -r "
-        \"\\(.url)|\" +
-        (if .statusCheckRollup then
-            (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
-                then \"FAIL\"
-                else \"PASS\"
-            end)
-        else \"?\" end) +
-        \"|\" +
-        (if (.labels | map(.name) | contains([\"approved\"])) then \"Y\" else \"N\" end) +
-        \"|\" +
-        (if (.labels | map(.name) | contains([\"lgtm\"])) then \"Y\" else \"N\" end) +
-        \"|\" +
-        (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"Y\" else \"N\" end) +
-        \"|\" +
-        (if (.labels | map(.name) | contains([\"do-not-merge/hold\"])) then \"Y\" else \"N\" end) +
-        \"|\" +
-        .author.login +
-        \"|\" +
-        .title"
-    else
-        jq -r "
-        \"\\(.number)|\" +
-        (if .statusCheckRollup then
-            (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
-                then \"FAIL\"
-                else \"PASS\"
-            end)
-        else \"?\" end) +
-        \"|\" +
-        (if (.labels | map(.name) | contains([\"approved\"])) then \"Y\" else \"N\" end) +
-        \"|\" +
-        (if (.labels | map(.name) | contains([\"lgtm\"])) then \"Y\" else \"N\" end) +
-        \"|\" +
-        (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"Y\" else \"N\" end) +
-        \"|\" +
-        (if (.labels | map(.name) | contains([\"do-not-merge/hold\"])) then \"Y\" else \"N\" end) +
-        \"|\" +
-        .author.login +
-        \"|\" +
-        .title"
-    fi
+    jq -r "
+    \"\\(.url)|\" +
+    (if .statusCheckRollup then
+        (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
+            then \"FAIL\"
+            else \"PASS\"
+        end)
+    else \"?\" end) +
+    \"|\" +
+    (if (.labels | map(.name) | contains([\"approved\"])) then \"Y\" else \"N\" end) +
+    \"|\" +
+    (if (.labels | map(.name) | contains([\"lgtm\"])) then \"Y\" else \"N\" end) +
+    \"|\" +
+    (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"Y\" else \"N\" end) +
+    \"|\" +
+    (if (.labels | map(.name) | contains([\"do-not-merge/hold\"])) then \"Y\" else \"N\" end) +
+    \"|\" +
+    .author.login +
+    \"|\" +
+    .title"
 }
 
 get_pr_data_compact() {
@@ -474,7 +443,7 @@ post_labels_and_comments() {
 main() {
     local ARGS
     ARGS=$(getopt -o r:c:Alna:j:x:th \
-                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,show-urls,help \
+                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
 
@@ -498,7 +467,6 @@ main() {
             --needs-ok-to-test)  needs_ok_to_test=1;        shift ;;
             --hold-cancel)       hold_cancel=1;             shift ;;
             --verbose-status)    verbose_status=1;          shift ;;
-            --show-urls)         show_urls=1;               shift ;;
             -h|--help)           usage ;;
             --)                  shift; break ;;
             *)                   usage ;;
@@ -531,7 +499,6 @@ main() {
             echo "  Needs approval: $needs_approve"
             echo "  Needs ok-to-test: $needs_ok_to_test"
             echo "  Output format: $([ "$verbose_status" -eq 1 ] && echo "verbose" || echo "compact")"
-            echo "  Show URLs: $([ "$show_urls" -eq 1 ] && echo "yes" || echo "no")"
             echo ""
         fi
 

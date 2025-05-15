@@ -64,10 +64,10 @@ autoprat -r openshift/bpfman-operator --list
 
 Example output:
 ```
-PR   CI    APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
-493  PASS  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
-492  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
-491  PASS  Y         N     Y        N     frobware            catalog/index.yaml: drop kube-rbac-proxy relatedImages references
+PR URL                                                 CI    APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
+https://github.com/openshift/bpfman-operator/pull/493  PASS  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
+https://github.com/openshift/bpfman-operator/pull/492  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
+https://github.com/openshift/bpfman-operator/pull/491  PASS  Y         N     Y        N     frobware            catalog/index.yaml: drop kube-rbac-proxy relatedImages references
 ```
 
 The compact format makes it easy to:
@@ -91,18 +91,7 @@ For detailed PR information, use the `--verbose-status` flag:
 autoprat -r openshift/bpfman-operator --list --verbose-status
 ```
 
-To display clickable URLs instead of PR numbers (makes it easier to open PRs in your browser):
-
-```bash
-autoprat -r openshift/bpfman-operator --list --show-urls
-```
-
-Example output with URLs:
-```
-PR URL                                                 CI    APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
-https://github.com/openshift/bpfman-operator/pull/493  PASS  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
-https://github.com/openshift/bpfman-operator/pull/492  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
-```
+The compact format includes clickable URLs so you can easily open PRs in your browser by clicking on them.
 
 Or view a specific PR (always shown in verbose format):
 
@@ -138,10 +127,10 @@ Find PRs that need approval or LGTM:
 autoprat -r openshift/bpfman-operator --list --needs-approve
 
 # Example output:
-# PR   CI    APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
-# 493  PASS  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
-# 492  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
-# 490  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update registry.access.redhat.com/ubi9/ubi-minimal docker tag to v9.6-1747218906
+# PR URL                                                 CI    APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
+# https://github.com/openshift/bpfman-operator/pull/493  PASS  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
+# https://github.com/openshift/bpfman-operator/pull/492  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
+# https://github.com/openshift/bpfman-operator/pull/490  FAIL  N         N     Y        N     app/red-hat-konflux  chore(deps): update registry.access.redhat.com/ubi9/ubi-minimal docker tag to v9.6-1747218906
 
 # Find PRs that need LGTM (with verbose output)
 autoprat -r openshift/bpfman-operator --list --needs-lgtm --verbose-status
