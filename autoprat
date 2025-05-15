@@ -68,6 +68,7 @@ needs_approve=0
 needs_ok_to_test=0
 hold_cancel=0
 verbose_status=0     # default to compact format
+failing_ci=0         # option to list only failing CI PRs
 # Always show clickable URLs in the compact format
 
 usage() {
@@ -104,6 +105,7 @@ Options:
   --needs-ok-to-test      Only show PRs needing ok-to-test (list mode)
   --hold-cancel           Post /hold cancel on PRs with do-not-merge/hold label
   -v, --verbose-status    Show detailed PR status (list mode)
+  -f, --failing-ci        Only show PR numbers with failing CI (useful for piping)
   -h, --help              Show this help
 
 Examples:
@@ -265,6 +267,9 @@ make_pr_filter() {
 
     [[ "$hold_cancel" -eq 1 ]] &&
         filter_conditions+=("(.labels | map(.name) | contains([\"do-not-merge/hold\"]))")
+
+    [[ "$failing_ci" -eq 1 ]] &&
+        filter_conditions+=("(.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)")
 
     [[ -n "$author" ]] &&
         filter_conditions+=("(.author.login | test(\"$author\"))")
@@ -527,8 +532,8 @@ post_labels_and_comments() {
 
 main() {
     local ARGS
-    ARGS=$(getopt -o r:c:Alna:j:x:thv \
-                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,help \
+    ARGS=$(getopt -o r:c:Alna:j:x:thvf \
+                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,failing-ci,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
 
@@ -552,6 +557,7 @@ main() {
             --needs-ok-to-test)  needs_ok_to_test=1;        shift ;;
             --hold-cancel)       hold_cancel=1;             shift ;;
             -v|--verbose-status) verbose_status=1;          shift ;;
+            -f|--failing-ci) failing_ci=1;           shift ;;
             -h|--help)           usage ;;
             --)                  shift; break ;;
             *)                   usage ;;
@@ -576,6 +582,17 @@ main() {
 
 
     if [[ "$list_mode" -eq 1 ]]; then
+        # Handle failing CI option specially - only output PR numbers
+        if [[ "$failing_ci" -eq 1 ]]; then
+            # Get PR numbers with failing CI for use in piping
+            local fields="number,statusCheckRollup"
+            local filter
+            filter=$(make_pr_filter)
+            gh pr list --repo "$repo" --state open --json "$fields" \
+               --jq ".[] | $filter | .number"
+            exit 0
+        fi
+
         # Only show configuration in list mode when in dry-run mode
         if [[ "$dry_run" -eq 1 ]]; then
             echo "List mode configuration (dry-run):"

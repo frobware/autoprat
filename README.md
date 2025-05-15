@@ -179,6 +179,17 @@ autoprat -r openshift/bpfman-operator --list --author "app/red-hat-konflux" --ne
 
 # Check CI status of PRs matching a pattern
 autoprat -r openshift/bpfman-operator --list --author ".*konflux.*"
+
+# Get only the PR numbers with failing CI (useful for piping to other commands)
+autoprat -r openshift/bpfman-operator --list --failing-ci
+# Or with short options
+autoprat -r openshift/bpfman-operator -l -f
+
+# Pipe failing PR numbers directly to another autoprat command (with dry-run first)
+autoprat -r openshift/bpfman-operator -n -c "/retest" $(autoprat -r openshift/bpfman-operator -l -f)
+
+# When ready, remove the -n flag to actually post the comments
+# autoprat -r openshift/bpfman-operator -c "/retest" $(autoprat -r openshift/bpfman-operator -l -f)
 ```
 
 
