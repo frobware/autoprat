@@ -8,41 +8,7 @@ set -o pipefail
 # custom comments, or re-trigger commands for failed CI jobs (strips
 # path prefixes for /test and /retest).
 
-# Check if this is a non-interactive session (being piped to)
-if [[ ! -t 0 ]]; then
-    # Check if any arguments look like PR numbers
-    has_pr_numbers=0
-    for arg in "$@"; do
-        if [[ "$arg" =~ ^[0-9]+$ ]]; then
-            has_pr_numbers=1
-            break
-        fi
-    done
-
-    # If no PR numbers provided in the arguments, read them from stdin
-    if [[ $has_pr_numbers -eq 0 ]]; then
-        # Capture stdin as PR numbers
-        pr_numbers=()
-        while IFS= read -r line; do
-            # Skip empty lines and non-numeric input
-            if [[ -n "$line" && "$line" =~ ^[0-9]+$ ]]; then
-                pr_numbers+=("$line")
-            fi
-        done
-
-        # If we got PR numbers, execute the same command with them added
-        if [[ ${#pr_numbers[@]} -gt 0 ]]; then
-            exec "$0" "$@" "${pr_numbers[@]}"
-        fi
-
-        # If we got here, either there were no valid PR numbers or exec failed
-        if [[ ${#pr_numbers[@]} -eq 0 ]]; then
-            echo "Error: No valid PR numbers provided via stdin" >&2
-            exit 1
-        fi
-        exit 1  # Should not reach here
-    fi
-fi
+# No stdin support - removed for simplicity
 
 # Higher-order function for conditional actions
 execute_if() {
@@ -538,11 +504,15 @@ pr_has_hold_label() {
 pr_needs_ok_to_test() {
     local pr="$1"
 
-    # In dry-run mode, check but don't require the label to be present
+    # In dry-run mode, always return success for testing
     if [[ "$dry_run" -eq 1 ]]; then
-        # Show a message if the label is missing, but still allow testing
-        if ! has_label "$pr" "needs-ok-to-test"; then
+        # Show a message about the label status
+        if has_label "$pr" "needs-ok-to-test"; then
+            echo "    PR has 'needs-ok-to-test' label; will post /ok-to-test"
+        else
             echo "    no 'needs-ok-to-test' label; would skip in non-dry-run mode"
+            # Return failure in dry-run mode if the label is missing
+            return 1
         fi
         return 0
     fi
