@@ -722,9 +722,15 @@ main() {
             mapfile -t pr_list < <(gh pr list --repo "$repo" --state open --json number --jq '.[].number')
         fi
     else
-        # Store PR numbers from arguments
+        # Store PR numbers from arguments and de-duplicate them
+        declare -A seen_prs=()
         for arg in "$@"; do
-            pr_list+=("$arg")
+            # Only add if we haven't seen this PR number before
+            if [[ -z "${seen_prs[$arg]+x}" ]]; then
+                pr_list+=("$arg")
+                # Mark as seen
+                seen_prs[$arg]=1
+            fi
         done
     fi
 
