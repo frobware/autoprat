@@ -157,7 +157,7 @@ autoprat -r openshift/bpfman-operator -l --needs-lgtm -v
 autoprat -r openshift/bpfman-operator --list --needs-approve --needs-lgtm
 ```
 
-### Filtering by author
+### Filtering by author and labels
 
 Filter PRs by author using exact match or regex patterns:
 
@@ -169,6 +169,18 @@ autoprat -r openshift/bpfman-operator --list --author "app/red-hat-konflux"
 autoprat -r openshift/bpfman-operator --list --author ".*bot.*"
 ```
 
+You can also filter PRs by their labels:
+
+```bash
+# Find PRs with a specific label
+autoprat -r openshift/bpfman-operator --list --label "kind/bug"
+
+# Find PRs that have multiple labels (AND condition - must have all specified labels)
+autoprat -r openshift/bpfman-operator --list --label "kind/bug" --label "priority/high"
+```
+
+The `--label` option is particularly useful for identifying specific types of PRs before taking action on them.
+
 ### Advanced usage
 
 Combine filters for targeted searching:
@@ -179,6 +191,9 @@ autoprat -r openshift/bpfman-operator --list --author "app/red-hat-konflux" --ne
 
 # Check CI status of PRs matching a pattern
 autoprat -r openshift/bpfman-operator --list --author ".*konflux.*"
+
+# Find high-priority bugs that need approval
+autoprat -r openshift/bpfman-operator --list --label "kind/bug" --label "priority/high" --needs-approve
 
 # Get only the PR numbers with failing CI (useful for piping to other commands)
 autoprat -r openshift/bpfman-operator --list --failing-ci
@@ -361,6 +376,14 @@ autoprat -r openshift/bpfman-operator -l --author "app/dependabot" -p | \
 # Find all PRs needing both LGTM and approval and add both
 autoprat -r openshift/bpfman-operator -l --needs-lgtm --needs-approve -p | \
   autoprat -r openshift/bpfman-operator --lgtm --approve -n
+
+# Find all bug PRs with a specific label, and retest failing ones
+autoprat -r openshift/bpfman-operator -l --label "kind/bug" -f | \
+  autoprat -r openshift/bpfman-operator -c "/retest"
+
+# Approve all high-priority bugs from a specific author
+autoprat -r openshift/bpfman-operator -l --label "priority/high" --label "kind/bug" --author "dependent-app" -p | \
+  autoprat -r openshift/bpfman-operator --approve -n
 ```
 
 ---

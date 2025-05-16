@@ -88,6 +88,7 @@ declare -A comment_label_map=(
 
 declare -a comments=()
 declare -a jobs=()
+declare -a filter_labels=()
 declare -A pr_titles=()
 declare -A pr_authors=()
 
@@ -126,6 +127,7 @@ Options:
   -l, --list              List PRs without taking action
   -A, --all               Apply to all open PRs
   -a, --author PATTERN    Filter PRs by author (regex pattern)
+  --label LABEL           Filter PRs with specified label (repeatable)
   --lgtm                  Add /lgtm (if no 'lgtm' label yet)
   --approve               Add /approve (if no 'approved' label yet)
   --ok-to-test            Add /ok-to-test (only on PRs with 'needs-ok-to-test' label)
@@ -192,6 +194,9 @@ Examples:
 
   # List PRs from a specific author.
   ${0##*/} -r OWNER/REPO --list --author "user.*"
+
+  # List PRs with specific labels.
+  ${0##*/} -r OWNER/REPO --list --label "kind/bug" --label "priority/high"
 
   # Find PRs needing approval or lgtm.
   ${0##*/} -r OWNER/REPO --list --needs-approve --needs-lgtm
@@ -311,6 +316,11 @@ make_pr_filter() {
 
     [[ -n "$author" ]] &&
         filter_conditions+=("(.author.login | test(\"$author\"))")
+
+    # Add filter conditions for each label
+    for label in "${filter_labels[@]}"; do
+        filter_conditions+=("(.labels | map(.name) | contains([\"$label\"]))")
+    done
     local jq_filter="."
     if [[ ${#filter_conditions[@]} -gt 0 ]]; then
         local conditions
@@ -571,7 +581,7 @@ post_labels_and_comments() {
 main() {
     local ARGS
     ARGS=$(getopt -o r:c:Alna:j:x:thvfp \
-                  --long repo:,comment:,all,list,author:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,failing-ci,numbers,pr-numbers,help \
+                  --long repo:,comment:,all,list,author:,label:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,failing-ci,numbers,pr-numbers,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
 
@@ -581,6 +591,7 @@ main() {
             -A|--all)            all_prs=1;         shift ;;
             -l|--list)           list_mode=1;       shift ;;
             -a|--author)         author="$2";       shift 2 ;;
+            --label)             filter_labels+=("$2"); shift 2 ;;
             --lgtm)              comments+=("/lgtm");       shift ;;
             --approve)           comments+=("/approve");    shift ;;
             --ok-to-test)        comments+=("/ok-to-test"); shift ;;
@@ -637,6 +648,7 @@ main() {
             echo "List mode configuration (dry-run):"
             echo "  Repository: $repo"
             echo "  Author filter: ${author:-none}"
+            echo "  Label filters: ${filter_labels[*]:-none}"
             echo "  Needs LGTM: $needs_lgtm"
             echo "  Needs approval: $needs_approve"
             echo "  Needs ok-to-test: $needs_ok_to_test"
