@@ -41,7 +41,7 @@ get_detailed_pr_data() {
     local pr_checks_data
 
     pr_view_data=$(gh pr view "$pr_num" --repo "$repo_name" --json number,title,author,url,createdAt,state,labels,statusCheckRollup)
-    pr_checks_data=$(gh pr checks "$pr_num" --repo "$repo_name" --json name,state | jq '[.[] | {context: .name, state: (if .state == "FAILURE" or .state == "failure" or .state == "fail" then "FAILURE" else "SUCCESS" end)}]' 2>/dev/null || echo "[]")
+    pr_checks_data=$(gh pr checks "$pr_num" --repo "$repo_name" --json name,state | jq '[.[] | {context: .name, state: (if .state == "FAILURE" or .state == "failure" or .state == "fail" or .state == "CANCELLED" then "FAILURE" else "SUCCESS" end)}]' 2>/dev/null || echo "[]")
 
     echo "$pr_view_data" | jq --argjson pr_checks "$pr_checks_data" '. + {extraStatusChecks: $pr_checks}'
 }
@@ -317,7 +317,7 @@ format_pr_tree_data() {
         if (.statusCheckRollup or .extraStatusChecks) then
             (
                 if (
-                    (.statusCheckRollup // [] | map(select(.state == \"FAILURE\")) | length > 0) or
+                    (.statusCheckRollup // [] | map(select(.state == \"FAILURE\" or .conclusion == \"FAILURE\")) | length > 0) or
                     (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
                 )
                 then \"Failing\"
@@ -368,11 +368,17 @@ format_pr_tree_data() {
 format_pr_compact() {
     jq -r "
     \"\\(.url)|\" +
-    (if .statusCheckRollup then
-        (if (.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)
+    (if (.statusCheckRollup or .extraStatusChecks) then
+        (if (
+            (.statusCheckRollup // [] | map(select(.state == \"FAILURE\" or .conclusion == \"FAILURE\")) | length > 0) or
+            (.extraStatusChecks // [] | map(select(.state == \"FAILURE\")) | length > 0)
+        )
             then \"FAIL\"
             else
-                (if (.statusCheckRollup | map(select(.state == \"PENDING\")) | length > 0)
+                (if (
+                    (.statusCheckRollup // [] | map(select(.state == \"PENDING\")) | length > 0) or
+                    (.extraStatusChecks // [] | map(select(.state == \"PENDING\")) | length > 0)
+                )
                     then \"PENDING\"
                     else \"PASS\"
                 end)
