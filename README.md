@@ -174,19 +174,6 @@ autoprat -r owner/repo --failing-ci --quiet > failing-prs.txt
 autoprat -r owner/repo --verbose 123
 ```
 
-### Pipeline Examples
-
-```bash
-# Find and approve PRs from automation that need it
-autoprat -r owner/repo --author "red-hat-konflux" --needs-approve -q | \
-  xargs -I{} autoprat -r owner/repo {} --approve --print | sh
-
-# Review then act on PRs
-autoprat -r owner/repo --needs-lgtm --needs-approve
-# ... review the list ...
-autoprat -r owner/repo --needs-lgtm --needs-approve --lgtm --approve --print | sh
-```
-
 ---
 
 ## Command Reference
