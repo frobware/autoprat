@@ -272,7 +272,7 @@ make_pr_filter() {
         filter_conditions+=("(.labels | map(.name) | contains([\"approved\"]) | not)")
 
     [[ "$needs_ok_to_test" -eq 1 ]] &&
-        filter_conditions+=("((.labels | map(.name) | contains([\"needs-ok-to-test\"])) or (.labels | map(.name) | contains([\"ok-to-test\"]) | not))")
+        filter_conditions+=("(.labels | map(.name) | contains([\"needs-ok-to-test\"]))")
 
     [[ "$hold_cancel" -eq 1 ]] &&
         filter_conditions+=("(.labels | map(.name) | contains([\"do-not-merge/hold\"]))")
@@ -336,7 +336,7 @@ format_pr_tree_data() {
         end
     ) + \"\\n\" +
     \"9|6|LGTM: \" + (if (.labels | map(.name) | contains([\"lgtm\"])) then \"Yes\" else \"No\" end) + \"\\n\" +
-    \"10|6|OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"No\" else (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"Yes\" else \"No\" end) end) + \"\\n\" +
+    \"10|6|OK-to-test: \" + (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"No\" else \"Yes\" end) + \"\\n\" +
     \"20|1|Labels\" +
     (if (.labels | length > 0) then
         (.labels | sort_by(.name) | to_entries | map(\"\\n\" + (21 + .key | tostring) + \"|20|\" + .value.name) | join(\"\"))
@@ -389,7 +389,7 @@ format_pr_compact() {
     \"|\" +
     (if (.labels | map(.name) | contains([\"lgtm\"])) then \"Y\" else \"N\" end) +
     \"|\" +
-    (if (.labels | map(.name) | contains([\"ok-to-test\"])) then \"Y\" else \"N\" end) +
+    (if (.labels | map(.name) | contains([\"needs-ok-to-test\"])) then \"N\" else \"Y\" end) +
     \"|\" +
     (if (.labels | map(.name) | contains([\"do-not-merge/hold\"])) then \"Y\" else \"N\" end) +
     \"|\" +

@@ -84,7 +84,7 @@ Column descriptions:
   - ?: CI status unknown
 - **APPROVED**: Whether the PR has been approved (Y yes, N no)
 - **LGTM**: Whether the PR has LGTM ("looks good to me") (Y yes, N no)
-- **OK2TEST**: Whether the PR is marked as "ok-to-test" (Y yes, N no)
+- **OK2TEST**: Whether the PR needs "/ok-to-test" comment (N if it has "needs-ok-to-test" label, Y otherwise)
 - **HOLD**: Whether the PR has a "do-not-merge/hold" label (Y yes, N no)
 
 #### Verbose Format
