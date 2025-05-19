@@ -1,0 +1,84 @@
+query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequests(first: 100, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {
+        number
+        title
+        headRefName
+        createdAt
+        state
+        mergeable
+        mergeStateStatus
+        reviewDecision
+        author {
+          login
+        }
+        labels(first: 20) {
+          nodes {
+            name
+          }
+        }
+        url
+        latestReviews(last: 10) {
+          nodes {
+            author {
+              login
+            }
+            state
+            submittedAt
+          }
+        }
+        reviewRequests(first: 10) {
+          nodes {
+            requestedReviewer {
+              ... on User {
+                login
+              }
+              ... on Team {
+                name
+              }
+            }
+          }
+        }
+        statusCheckRollup {
+          contexts(first: 100) {
+            nodes {
+              __typename
+              ... on CheckRun {
+                name
+                conclusion
+                detailsUrl
+                startedAt
+                completedAt
+              }
+              ... on StatusContext {
+                context
+                state
+                targetUrl
+              }
+            }
+          }
+        }
+        commits(last: 1) {
+          nodes {
+            commit {
+              oid
+              status {
+                state
+              }
+            }
+          }
+        }
+        comments(last: 5) {
+          nodes {
+            author {
+              login
+            }
+            body
+            createdAt
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,389 +1,299 @@
-# autoprat: **Autonomous Pull-Request Automation**
+# autoprat: Pull Request Automation Tool
 
-Automate the tedium out of your GitHub workflow.
+Automate GitHub PR comment workflows from the command line.
 
-No more opening PRs in a browser to type `/lgtm`, `/approve`, `/ok-to-test`, `/test`, `/retest` or `/override ci/prow/...` by hand. Let **autoprat** handle it with just enough contempt for the process to keep you sane.
+No more opening PRs in a browser to type `/lgtm`, `/approve`, `/ok-to-test`, or `/retest`. Let autoprat generate the commands for you.
+
+---
+
+## How it Works
+
+autoprat filters pull requests and generates `gh` CLI commands for common actions:
+
+1. **Filter** PRs based on criteria (author, labels, CI status)
+2. **Generate** `gh` commands for the actions you want
+3. **Output** commands for review and execution
+
+**Note**: autoprat only generates commands. To execute them, pipe to `sh`:
+
+```bash
+autoprat -r owner/repo --needs-approve --approve --print | sh
+```
 
 ---
 
 ## Installation
 
-1. Clone or download this repo:
+### Prerequisites
 
-   ```bash
-   git clone https://github.com/frobware/autoprat.git
-   cd autoprat
-   chmod +x autoprat
-   cp autoprat $HOME/bin/autoprat
-   ```
+- `gh` (GitHub CLI) - must be authenticated
+- Go 1.24+ (to build from source)
 
-2. Install prerequisites:
+### Install
 
-   - GitHub CLI (`gh`)
-   - `jq`
+Using `go install`:
 
-3. Authenticate `gh` if you haven't already:
+```bash
+go install github.com/frobware/autoprat/cmd/autoprat@latest
+```
 
-   ```bash
-   gh auth login
-   ```
+Or clone and build:
+
+```bash
+git clone https://github.com/frobware/autoprat.git
+cd autoprat
+go build -o autoprat ./cmd/autoprat
+```
 
 ---
 
-## Why autoprat?
+## Core Concepts
 
-You are tired of:
+### Filters vs Actions
 
-- Clicking into each bot-generated PR just to type `/lgtm`
-- Remembering whether to use `/approve` or `/ok-to-test` or `/override`
-- Stripping off `ci/prow/` prefixes for `/test` commands
-- Copy/pasting job names across multiple repositories
+autoprat separates filtering from actions:
 
-**autoprat** does it all in one command. You choose the flags; it chooses the right comment, idempotently. No more manual drudgery.
+- **Filters** select PRs to work with
+- **Actions** define what commands to generate
 
----
-
-## Exploring PRs with autoprat
-
-**autoprat** includes a built-in list mode that makes it easy to explore PRs before taking action. Use the `--list` option to see what PRs are available and which ones need attention.
-
-### Viewing PRs: Compact vs. Verbose Format
-
-autoprat offers two different formats for viewing PRs:
-
-1. **Compact Format** (default): Shows PRs in a tabular format with key status indicators
-2. **Verbose Format**: Shows detailed information for each PR
-
-#### Compact Format
-
-By default, `--list` shows PRs in a compact tabular format for quick scanning:
-
-```bash
-autoprat -r openshift/bpfman-operator --list
-```
-
-Example output:
-```
-PR URL                                                 CI      APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
-https://github.com/openshift/bpfman-operator/pull/493  PASS    N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
-https://github.com/openshift/bpfman-operator/pull/492  FAIL    N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
-https://github.com/openshift/bpfman-operator/pull/491  PENDING Y         N     Y        N     frobware            catalog/index.yaml: drop kube-rbac-proxy relatedImages references
-```
-
-The compact format makes it easy to:
-- Quickly scan PR statuses across multiple dimensions
-- Identify PRs that need attention
-- Focus on critical information without scrolling through detailed output
-
-Column descriptions:
-- **PR URL**: Clickable URL to the Pull Request
-- **CI**: Continuous Integration status:
-  - PASS: All CI jobs are passing
-  - PENDING: Some CI jobs are still in progress
-  - FAIL: One or more CI jobs are failing
-  - ?: CI status unknown
-- **APPROVED**: Whether the PR has been approved (Y yes, N no)
-- **LGTM**: Whether the PR has LGTM ("looks good to me") (Y yes, N no)
-- **OK2TEST**: Whether the PR needs "/ok-to-test" comment (N if it has "needs-ok-to-test" label, Y otherwise)
-- **HOLD**: Whether the PR has a "do-not-merge/hold" label (Y yes, N no)
-
-#### Verbose Format
-
-For detailed PR information, use the `-v` or `--verbose-status` flag:
-
-```bash
-autoprat -r openshift/bpfman-operator --list --verbose-status
-# Or use the shorter form
-autoprat -r openshift/bpfman-operator -l -v
-```
-
-You can also view specific PRs which are always shown in verbose format:
-
-```bash
-autoprat -r openshift/bpfman-operator --list 488
-```
-
-The verbose format organizes information in a tree structure that makes it easy to navigate:
+### Filter Options
 
 ```
-https://github.com/openshift/bpfman-operator/pull/489
-├─Title: chore(deps): update ocp-bpfman-operator to 65b0d10 (app/red-hat-konflux)
-├─PR #489
-├─State: OPEN
-├─Created: 2025-05-12 14:59:30
-├─Status
-│ ├─Approved: No
-│ ├─CI: Failing
-│ ├─LGTM: No
-│ └─OK-to-test: Yes
-├─Labels
-│ ├─konflux-nudge
-│ └─needs-ok-to-test
-└─Checks
-  ├─Red Hat Konflux / bpfman-operator-bundle-on-pull-request: SUCCESS
-  ├─Red Hat Konflux / bpfman-operator-enterprise-contract / ocp-bpfman-operator-bundle: FAILURE
-  └─tide: PENDING
+--author <exact>        Filter by author (exact match)
+--author-fuzzy <fuzzy>  Filter by author (substring match)
+--label <label>         Filter by label (prefix with ! to negate)
+--failing-ci            Only PRs with failing CI
+--needs-approve         Only PRs missing 'approved' label
+--needs-lgtm            Only PRs missing 'lgtm' label
+--needs-ok-to-test      Only PRs with 'needs-ok-to-test' label
 ```
 
-The tree format provides:
-- Hierarchical organization of PR information
-- Visual indentation to group related information
-- Complete CI check details with their status
-- All PR labels clearly visible
-- Status indicators for LGTM, Approval, CI, and OK-to-test
+### Action Options
 
-Both formats include clickable URLs so you can easily open PRs in your browser.
-
-### Finding PRs that need attention
-
-Find PRs that need approval or LGTM:
-
-```bash
-# Find PRs that need approval (compact format)
-autoprat -r openshift/bpfman-operator --list --needs-approve
-
-# Example output:
-# PR URL                                                 CI      APPROVED  LGTM  OK2TEST  HOLD  AUTHOR              TITLE
-# https://github.com/openshift/bpfman-operator/pull/493  PASS    N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator to b154157
-# https://github.com/openshift/bpfman-operator/pull/492  FAIL    N         N     Y        N     app/red-hat-konflux  chore(deps): update ocp-bpfman-operator-bundle to 4a7ebff
-# https://github.com/openshift/bpfman-operator/pull/490  PENDING N         N     Y        N     app/red-hat-konflux  chore(deps): update registry.access.redhat.com/ubi9/ubi-minimal docker tag to v9.6-1747218906
-
-# Find PRs that need LGTM (with verbose output)
-autoprat -r openshift/bpfman-operator --list --needs-lgtm --verbose-status
-# Or with short options
-autoprat -r openshift/bpfman-operator -l --needs-lgtm -v
-
-# Find PRs needing both approval and LGTM
-autoprat -r openshift/bpfman-operator --list --needs-approve --needs-lgtm
+```
+--approve               Post /approve comment
+--lgtm                  Post /lgtm comment
+--ok-to-test            Post /ok-to-test comment
+--comment <text>        Post custom comment
 ```
 
-### Filtering by author and labels
+### Output Modes
 
-Filter PRs by author using exact match or regex patterns:
-
-```bash
-# Exact match for a specific author
-autoprat -r openshift/bpfman-operator --list --author "app/red-hat-konflux"
-
-# Regex pattern to find bot authors
-autoprat -r openshift/bpfman-operator --list --author ".*bot.*"
 ```
-
-You can also filter PRs by their labels:
-
-```bash
-# Find PRs with a specific label
-autoprat -r openshift/bpfman-operator --list --label "kind/bug"
-
-# Find PRs that have multiple labels (AND condition - must have all specified labels)
-autoprat -r openshift/bpfman-operator --list --label "kind/bug" --label "priority/high"
-```
-
-The `--label` option is particularly useful for identifying specific types of PRs before taking action on them.
-
-### Advanced usage
-
-Combine filters for targeted searching:
-
-```bash
-# Find PRs from automated accounts that need approval
-autoprat -r openshift/bpfman-operator --list --author "app/red-hat-konflux" --needs-approve
-
-# Check CI status of PRs matching a pattern
-autoprat -r openshift/bpfman-operator --list --author ".*konflux.*"
-
-# Find high-priority bugs that need approval
-autoprat -r openshift/bpfman-operator --list --label "kind/bug" --label "priority/high" --needs-approve
-
-# Get only the PR numbers with failing CI (useful for piping to other commands)
-autoprat -r openshift/bpfman-operator --list --failing-ci
-autoprat -r openshift/bpfman-operator -l --failing-ci -p
-
-# Method 1: Pipe failing PR numbers directly using command substitution (with dry-run first)
-autoprat -r openshift/bpfman-operator -n -c "/retest" $(autoprat -r openshift/bpfman-operator -l -p --failing-ci)
-
-# Method 2: Direct pipeline using stdin (NEW and recommended)
-autoprat -r openshift/bpfman-operator -l -p --failing-ci | autoprat -r openshift/bpfman-operator -n -c "/retest"
-
-# Method 3: Using the general PR numbers option with any filter
-# Get numbers of all PRs needing LGTM and retest them
-autoprat -r openshift/bpfman-operator -l --needs-lgtm -p | autoprat -r openshift/bpfman-operator -n -c "/retest"
-
-# When ready, remove the -n flag to actually post the comments
-# autoprat -r openshift/bpfman-operator -l -p --failing-ci | autoprat -r openshift/bpfman-operator -c "/retest"
-```
-
-
-### Complete workflow example
-
-Here's a complete workflow using autoprat:
-
-```bash
-# 1. Find PRs that need approval
-autoprat -r openshift/bpfman-operator --list --needs-approve
-
-# 2. Check which of those are from automation accounts
-autoprat -r openshift/bpfman-operator --list --needs-approve --author "app/red-hat-konflux"
-
-# 3. Get detailed view of a specific PR
-autoprat -r openshift/bpfman-operator --list --needs-approve --author "app/red-hat-konflux" 489
-
-# 4. Approve those PRs (with dry-run first)
-autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" --approve
-
-# 5. If everything looks good, run without -n to actually post the comments
-# autoprat -r openshift/bpfman-operator -a --author "app/red-hat-konflux" --approve
+(default)               Show PR table
+--print, -P             Print gh commands instead of PR list
+--verbose, -v           Show detailed PR information
+--quiet, -q             Show PR numbers only
 ```
 
 ---
 
 ## Examples
 
-### Single-PR operations
+### Basic Workflow
 
-- Give it your approval and LGTM:
+1. **Find PRs that need approval:**
+   ```bash
+   autoprat -r openshift/bpfman-operator --needs-approve
+   ```
 
-  ```bash
-  autoprat -r OWNER/REPO --lgtm --approve 123
-  ```
+2. **Generate approval commands:**
+   ```bash
+   autoprat -r openshift/bpfman-operator --needs-approve --approve --print
+   ```
 
-- Grant ok-to-test (only on PRs with 'needs-ok-to-test' label):
+3. **Execute commands:**
+   ```bash
+   autoprat -r openshift/bpfman-operator --needs-approve --approve --print | sh
+   ```
 
-  ```bash
-  autoprat -r OWNER/REPO --ok-to-test 123
-  # posts: /ok-to-test (only if PR has needs-ok-to-test label)
-  ```
+### Filtering Examples
 
-- Re-run just the `test-fmt` job:
+```bash
+# PRs from specific author
+autoprat -r owner/repo --author "red-hat-konflux"
 
-  ```bash
-  autoprat -r OWNER/REPO 123 -j ci/prow/test-fmt
-  # posts: /test test-fmt
-  ```
+# PRs from authors containing "bot"
+autoprat -r owner/repo --author-fuzzy "bot"
 
-- Override a context:
+# PRs with specific label
+autoprat -r owner/repo --label "kind/bug"
 
-  ```bash
-  autoprat -r OWNER/REPO 123 -x /override -j ci/prow/test-fmt
-  # posts: /override ci/prow/test-fmt
-  ```
+# PRs WITHOUT a label (negation)
+autoprat -r owner/repo --label "!do-not-merge"
 
-- Post a bare `/retest`:
+# Combine filters (AND logic)
+autoprat -r owner/repo --author "dependabot" --needs-lgtm --failing-ci
 
-  ```bash
-  autoprat -r OWNER/REPO -c /retest 123
-  # posts: /retest
-  ```
+# Multiple labels (must have all)
+autoprat -r owner/repo --label "kind/bug" --label "priority/high"
 
-- Remove a hold on a PR with `do-not-merge/hold` label:
+# Multiple comments on matched PRs
+autoprat -r owner/repo --failing-ci \
+  --comment "CI is failing" \
+  --comment "Please check the logs" \
+  --print | sh
+```
 
-  ```bash
-  autoprat -r OWNER/REPO --hold-cancel 123
-  # posts: /hold cancel (only if PR has do-not-merge/hold label)
-  ```
+### Action Examples
 
-### Bulk operations (all open PRs)
+```bash
+# Approve all PRs from dependabot
+autoprat -r owner/repo --author "dependabot" --approve --print | sh
 
-- Approve, LGTM and OK-to-test every open PR:
+# LGTM and approve PRs missing both
+autoprat -r owner/repo --needs-lgtm --needs-approve --lgtm --approve --print | sh
 
-  ```bash
-  autoprat -r OWNER/REPO -a --lgtm --approve --ok-to-test
-  ```
+# Comment on failing PRs
+autoprat -r owner/repo --failing-ci --comment "Investigating CI failure" --print | sh
 
-- Filter PRs by author (exact match):
+# Give ok-to-test to PRs that need it
+autoprat -r owner/repo --needs-ok-to-test --ok-to-test --print | sh
+```
 
-  ```bash
-  # Approve all PRs from a specific automation account
-  autoprat -r openshift/bpfman-operator -a --author "app/red-hat-konflux" --approve
-  ```
+### Advanced Examples
 
-- Filter PRs by author (regex pattern):
+```bash
+# Dry run - see what commands would be generated
+autoprat -r owner/repo --needs-approve --approve --print
 
-  ```bash
-  # Add lgtm to all PRs from authors with "konflux" in their name
-  autoprat -r openshift/bpfman-operator -a --author ".*konflux.*" --lgtm
-  ```
+# Multiple actions on filtered PRs
+autoprat -r owner/repo \
+  --author "red-hat-konflux" \
+  --needs-lgtm \
+  --needs-approve \
+  --lgtm \
+  --approve \
+  --comment "Automated approval" \
+  --print | sh
 
-- Add a comment to all PRs from a specific author:
+# Get PR numbers for scripting
+autoprat -r owner/repo --failing-ci --quiet > failing-prs.txt
 
-  ```bash
-  # Post a retest comment on all PRs from the automation account
-  autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" -c "/retest"
-  ```
-
-- Remove holds on all PRs with `do-not-merge/hold` label:
-
-  ```bash
-  # Post /hold cancel on all PRs with the do-not-merge/hold label
-  autoprat -r OWNER/REPO -a --hold-cancel
-  ```
-
-- Remove holds on PRs from a specific author with `do-not-merge/hold` label:
-
-  ```bash
-  # Post /hold cancel on automation account PRs with the do-not-merge/hold label
-  autoprat -r OWNER/REPO -a --author "app/red-hat-konflux" --hold-cancel
-  ```
-
-- Re-trigger specific CI jobs for PRs from a specific author:
-
-  ```bash
-  # Re-trigger a failing CI job for all PRs from the automation account
-  autoprat -r openshift/bpfman-operator -a -n --author "app/red-hat-konflux" -j "ocp-bpfman-operator-bundle"
-  ```
-
-- Re-run multiple jobs on every PR from a specific author and leave a note:
-
-  ```bash
-  autoprat -r openshift/bpfman-operator -a -n \
-    --author "app/red-hat-konflux" \
-    -j ocp-bpfman-operator-bundle \
-    -j bpfman-operator-bundle-on-pull-request \
-    -x /retest \
-    -c "Re-running CI jobs - automated message"
-  ```
-
-- Dry-run to verify what would happen:
-
-  ```bash
-  autoprat -r openshift/bpfman-operator -a -n \
-    --author "app/red-hat-konflux" \
-    --ok-to-test
-  ```
+# View specific PR details
+autoprat -r owner/repo --verbose 123
+```
 
 ### Pipeline Examples
 
-Using the pipeline feature, you can create powerful chains of autoprat commands:
+```bash
+# Find and approve PRs from automation that need it
+autoprat -r owner/repo --author "red-hat-konflux" --needs-approve -q | \
+  xargs -I{} autoprat -r owner/repo {} --approve --print | sh
+
+# Review then act on PRs
+autoprat -r owner/repo --needs-lgtm --needs-approve
+# ... review the list ...
+autoprat -r owner/repo --needs-lgtm --needs-approve --lgtm --approve --print | sh
+```
+
+---
+
+## Command Reference
+
+```
+Usage:
+  autoprat -r OWNER/REPO [OPTIONS] [PR-NUMBER...]
+
+Required:
+  -r, --repo OWNER/REPO     GitHub repository
+
+Filters:
+  --author EXACT            Filter by author (exact match)
+  -A, --author-fuzzy FUZZY  Filter by author (substring)
+  -l, --label LABEL         Filter by label (! prefix to negate)
+  -f, --failing-ci          Only PRs with failing CI
+  --needs-approve           Only PRs missing 'approved' label
+  --needs-lgtm              Only PRs missing 'lgtm' label
+  --needs-ok-to-test        Only PRs with 'needs-ok-to-test' label
+
+Actions:
+  --approve                 Generate /approve commands
+  --lgtm                    Generate /lgtm commands
+  --ok-to-test              Generate /ok-to-test commands
+  -c, --comment TEXT        Generate custom comment commands
+
+Output:
+  -P, --print               Print gh commands (required for actions)
+  -v, --verbose             Show PR details
+  -q, --quiet               Show PR numbers only
+
+Positional:
+  [PR-NUMBER...]            Specific PR numbers to process
+```
+
+---
+
+## Implementation
+
+autoprat uses GitHub's GraphQL API to fetch PR data, applies filters in-memory, and generates `gh pr comment` commands.
+
+Features:
+- Single API call for all PR data
+- Explicit filter and action separation
+- Standard Unix pipe compatibility
+- Command preview before execution
+
+---
+
+## Common Workflows
+
+### Daily PR Maintenance
 
 ```bash
-# Retry all failing CI jobs from a specific author
-autoprat -r openshift/bpfman-operator -l -p --failing-ci --author "app/red-hat-konflux" | \
-  autoprat -r openshift/bpfman-operator -c "/retest"
+# Check what needs attention
+autoprat -r myorg/myrepo --needs-approve
 
-# LGTM and approve all PRs that need approval, without affecting PRs already approved
-autoprat -r openshift/bpfman-operator -l --needs-approve | \
-  autoprat -r openshift/bpfman-operator --lgtm --approve
+# Approve PRs from trusted bots
+autoprat -r myorg/myrepo --author "dependabot" --approve --print | sh
+autoprat -r myorg/myrepo --author "renovate" --approve --print | sh
 
-# Find all PRs with failing CI and add a specific comment to them
-autoprat -r openshift/bpfman-operator -l -p --failing-ci | \
-  autoprat -r openshift/bpfman-operator -c "Investigating failing tests..."
-
-# Find any PRs from a specific author and approve them
-autoprat -r openshift/bpfman-operator -l --author "app/dependabot" -p | \
-  autoprat -r openshift/bpfman-operator --approve -n
-
-# Find all PRs needing both LGTM and approval and add both
-autoprat -r openshift/bpfman-operator -l --needs-lgtm --needs-approve -p | \
-  autoprat -r openshift/bpfman-operator --lgtm --approve -n
-
-# Find all bug PRs with a specific label, and retest failing ones
-autoprat -r openshift/bpfman-operator -l -p --label "kind/bug" --failing-ci | \
-  autoprat -r openshift/bpfman-operator -c "/retest"
-
-# Approve all high-priority bugs from a specific author
-autoprat -r openshift/bpfman-operator -l --label "priority/high" --label "kind/bug" --author "dependent-app" -p | \
-  autoprat -r openshift/bpfman-operator --approve -n
+# Handle PRs needing ok-to-test
+autoprat -r myorg/myrepo --needs-ok-to-test --ok-to-test --print | sh
 ```
+
+### CI Failure Investigation
+
+```bash
+# List failing PRs
+autoprat -r myorg/myrepo --failing-ci
+
+# View failure details
+autoprat -r myorg/myrepo --failing-ci --verbose
+
+# Comment on failing PRs
+autoprat -r myorg/myrepo --failing-ci \
+  --comment "CI is failing, investigating..." --print | sh
+```
+
+### Bulk Operations
+
+```bash
+# Step 1: See what needs both LGTM and approval
+autoprat -r myorg/myrepo --needs-lgtm --needs-approve
+
+# Step 2: Filter by author if needed
+autoprat -r myorg/myrepo --needs-lgtm --needs-approve \
+  --author "trusted-contributor"
+
+# Step 3: Review commands
+autoprat -r myorg/myrepo --needs-lgtm --needs-approve \
+  --author "trusted-contributor" --lgtm --approve --print
+
+# Step 4: Execute
+autoprat -r myorg/myrepo --needs-lgtm --needs-approve \
+  --author "trusted-contributor" --lgtm --approve --print | sh
+```
+
+---
+
+## Tips
+
+1. **Review first**: Use `--print` without `| sh` to see commands
+2. **Multiple filters**: Filters combine with AND logic
+3. **Scripting**: Use `--quiet` to get PR numbers only
+4. **Test filters**: Run without actions to see matched PRs
+5. **Start small**: Test on individual PRs before bulk operations
 
 ---
 
