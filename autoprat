@@ -110,7 +110,7 @@ Options:
   --needs-ok-to-test      Only show PRs needing ok-to-test (list mode)
   --hold-cancel           Post /hold cancel on PRs with do-not-merge/hold label
   -v, --verbose-status    Show detailed PR status (list mode)
-  -f, --failing-ci        Only show PR numbers with failing CI (useful for piping)
+  --failing-ci            Only show PRs with failing CI (useful for filtering)
   -p, --numbers           Output only PR numbers (useful for piping with any filter)
   -h, --help              Show this help
 
@@ -278,7 +278,7 @@ make_pr_filter() {
         filter_conditions+=("(.labels | map(.name) | contains([\"do-not-merge/hold\"]))")
 
     [[ "$failing_ci" -eq 1 ]] &&
-        filter_conditions+=("(.statusCheckRollup | map(select(.state == \"FAILURE\")) | length > 0)")
+        filter_conditions+=("(.statusCheckRollup | map(select(.state == \"FAILURE\" or .conclusion == \"FAILURE\")) | length > 0)")
 
     [[ -n "$author" ]] &&
         filter_conditions+=("(.author.login | test(\"$author\"))")
@@ -556,7 +556,7 @@ post_labels_and_comments() {
 
 main() {
     local ARGS
-    ARGS=$(getopt -o r:c:Alna:j:x:thvfp \
+    ARGS=$(getopt -o r:c:Alna:j:x:thvp \
                   --long repo:,comment:,all,list,author:,label:,lgtm,approve,ok-to-test,job:,dry-run,cmd:,show-title,no-pager,needs-lgtm,needs-approve,needs-ok-to-test,hold-cancel,verbose-status,failing-ci,numbers,pr-numbers,help \
                   -- "$@") || usage
     eval set -- "$ARGS"
@@ -582,7 +582,7 @@ main() {
             --needs-ok-to-test)  needs_ok_to_test=1;        shift ;;
             --hold-cancel)       hold_cancel=1;             shift ;;
             -v|--verbose-status) verbose_status=1;          shift ;;
-            -f|--failing-ci) failing_ci=1;           shift ;;
+            --failing-ci) failing_ci=1;              shift ;;
             -p|--numbers|--pr-numbers) numbers_only=1;       shift ;;
             -h|--help)           usage ;;
             --)                  shift; break ;;
@@ -609,7 +609,7 @@ main() {
 
     if [[ "$list_mode" -eq 1 ]]; then
         # Handle PR numbers-only output mode
-        if [[ "$numbers_only" -eq 1 || "$failing_ci" -eq 1 ]]; then
+        if [[ "$numbers_only" -eq 1 ]]; then
             # Get PR numbers for use in piping
             local fields="number,title,author,url,createdAt,labels,statusCheckRollup,state"
             local filter
