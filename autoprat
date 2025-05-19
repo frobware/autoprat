@@ -543,15 +543,23 @@ post_ok_to_test() {
     return 0
 }
 
-post_labels_and_comments() {
+post_labels_and_comments_array() {
     local pr="$1" did=0
-    for comment in "${comments[@]}"; do
+    shift
+    local comment_list=("$@")
+
+    for comment in "${comment_list[@]}"; do
         if execute_if "needs_comment" "post_comment" "$pr" "$comment"; then
             did=1
         fi
     done
 
     (( did > 0 ))
+}
+
+post_labels_and_comments() {
+    local pr="$1" did=0
+    post_labels_and_comments_array "$pr" "${comments[@]}"
 }
 
 main() {
@@ -735,12 +743,9 @@ process_pr() {
     local did_any=0
     set +e  # Disable exit on error for these function calls
 
-    # Make a local copy of the comments array to avoid modifying the global one
-    local pr_comments=("${comments[@]}")
-
     # Check for ok-to-test in comments and handle separately
     local has_ok_to_test=0
-    for comment in "${pr_comments[@]}"; do
+    for comment in "${comments[@]}"; do
         if [[ "$comment" == "/ok-to-test" ]]; then
             has_ok_to_test=1
             break
@@ -748,27 +753,24 @@ process_pr() {
     done
 
     if [[ "$has_ok_to_test" -eq 1 ]]; then
-        # Remove /ok-to-test from the local comments array to prevent default handling
-        local filtered_comments=()
-        for comment in "${pr_comments[@]}"; do
-            if [[ "$comment" != "/ok-to-test" ]]; then
-                filtered_comments+=("$comment")
-            fi
-        done
-        # Use the filtered comments for this PR only, don't modify the global array
-        pr_comments=("${filtered_comments[@]}")
-
         # Only post /ok-to-test if PR has needs-ok-to-test label
         execute_if pr_needs_ok_to_test post_ok_to_test "$pr" && did_any=1
     fi
 
     post_jobs "$pr" && did_any=1
 
-    # Use the local PR comments array to post other comments/labels
-    local old_comments=("${comments[@]}")
-    comments=("${pr_comments[@]}")
-    post_labels_and_comments "$pr" && did_any=1
-    comments=("${old_comments[@]}") # Restore the global array
+    # Process all comments except for /ok-to-test which is handled separately
+    local standard_comments=()
+    for comment in "${comments[@]}"; do
+        if [[ "$comment" != "/ok-to-test" ]]; then
+            standard_comments+=("$comment")
+        fi
+    done
+
+    # Only proceed if there are standard comments to post
+    if [[ ${#standard_comments[@]} -gt 0 ]]; then
+        post_labels_and_comments_array "$pr" "${standard_comments[@]}" && did_any=1
+    fi
 
     # Handle hold cancel if flag is set
     if [[ "$hold_cancel" -eq 1 ]]; then
