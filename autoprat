@@ -735,9 +735,12 @@ process_pr() {
     local did_any=0
     set +e  # Disable exit on error for these function calls
 
+    # Make a local copy of the comments array to avoid modifying the global one
+    local pr_comments=("${comments[@]}")
+
     # Check for ok-to-test in comments and handle separately
     local has_ok_to_test=0
-    for comment in "${comments[@]}"; do
+    for comment in "${pr_comments[@]}"; do
         if [[ "$comment" == "/ok-to-test" ]]; then
             has_ok_to_test=1
             break
@@ -745,21 +748,27 @@ process_pr() {
     done
 
     if [[ "$has_ok_to_test" -eq 1 ]]; then
-        # Remove /ok-to-test from comments array to prevent default handling
+        # Remove /ok-to-test from the local comments array to prevent default handling
         local filtered_comments=()
-        for comment in "${comments[@]}"; do
+        for comment in "${pr_comments[@]}"; do
             if [[ "$comment" != "/ok-to-test" ]]; then
                 filtered_comments+=("$comment")
             fi
         done
-        comments=("${filtered_comments[@]}")
+        # Use the filtered comments for this PR only, don't modify the global array
+        pr_comments=("${filtered_comments[@]}")
 
         # Only post /ok-to-test if PR has needs-ok-to-test label
         execute_if pr_needs_ok_to_test post_ok_to_test "$pr" && did_any=1
     fi
 
     post_jobs "$pr" && did_any=1
+
+    # Use the local PR comments array to post other comments/labels
+    local old_comments=("${comments[@]}")
+    comments=("${pr_comments[@]}")
     post_labels_and_comments "$pr" && did_any=1
+    comments=("${old_comments[@]}") # Restore the global array
 
     # Handle hold cancel if flag is set
     if [[ "$hold_cancel" -eq 1 ]]; then
