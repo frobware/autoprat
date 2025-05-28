@@ -55,6 +55,14 @@ type CLI struct {
 }
 
 func main() {
+	// Handle -help as an alias for --help
+	for i, arg := range os.Args {
+		if arg == "-help" {
+			os.Args[i] = "--help"
+			break
+		}
+	}
+
 	var cli CLI
 	kong.Parse(&cli)
 
