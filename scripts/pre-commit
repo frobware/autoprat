@@ -38,7 +38,9 @@ if git rev-parse --verify HEAD >/dev/null 2>&1; then
     fi
 fi
 
-if gofmt -l . | grep .; then
+if unformatted=$(gofmt -l .); [ -n "$unformatted" ]; then
+    echo "Error: Go code is not properly formatted. Run 'gofmt -w .' to fix:"
+    echo "$unformatted"
     exit 1
 fi
 
