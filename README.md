@@ -82,8 +82,10 @@ autoprat separates filtering from actions:
 ```
 (default)               Show PR table
 --print, -P             Print gh commands instead of PR list
---verbose, -v           Show detailed PR information
+--verbose, -v           Show detailed PR information with clickable/copyable log URLs
+-V                      Show detailed PR information with automatic error log extraction
 --quiet, -q             Show PR numbers only
+--no-hyperlinks         Force explicit URLs (useful for terminals without hyperlink support)
 ```
 
 ---
@@ -174,6 +176,25 @@ autoprat -r owner/repo --failing-ci --quiet > failing-prs.txt
 autoprat -r owner/repo --verbose 123
 ```
 
+### Log Viewing Examples
+
+```bash
+# View PR status with log access (smart hyperlinks/URLs based on terminal)
+autoprat -r owner/repo --verbose
+
+# View PR status with automatic error extraction from failing checks
+autoprat -r owner/repo -V
+
+# Force explicit URLs (useful for Alacritty or copy/paste workflows)
+autoprat -r owner/repo --verbose --no-hyperlinks
+
+# Focus on failures with detailed error logs
+autoprat -r owner/repo --failing-ci -V
+
+# Check specific failing PR with error extraction
+autoprat -r owner/repo -V 123
+```
+
 ---
 
 ## Command Reference
@@ -202,12 +223,28 @@ Actions:
 
 Output:
   -P, --print               Print gh commands (required for actions)
-  -v, --verbose             Show PR details
+  -v, --verbose             Show PR details with clickable/copyable log URLs
+  -V                        Show PR details with automatic error log extraction
   -q, --quiet               Show PR numbers only
+  --no-hyperlinks           Force explicit URLs (for terminals without hyperlink support)
 
 Positional:
   [PR-NUMBER...]            Specific PR numbers to process
 ```
+
+---
+
+## Terminal Compatibility
+
+autoprat automatically detects your terminal's capabilities and provides the best log access experience:
+
+### Hyperlink Support
+- **iTerm2, GNOME Terminal, Windows Terminal, VS Code**: Clickable status text (SUCCESS/FAILURE become hyperlinks)
+- **Alacritty, older terminals**: Explicit URLs shown for copy/paste
+- **Override**: Use `--no-hyperlinks` to force explicit URLs
+
+### Automatic Detection
+autoprat checks environment variables (`TERM`, `TERM_PROGRAM`, etc.) to determine hyperlink support. No configuration needed.
 
 ---
 
@@ -220,6 +257,8 @@ Features:
 - Explicit filter and action separation
 - Standard Unix pipe compatibility
 - Command preview before execution
+- Smart terminal detection for optimal log access
+- Automatic error extraction from CI logs
 
 ---
 
@@ -245,8 +284,11 @@ autoprat -r myorg/myrepo --needs-ok-to-test --ok-to-test --print | sh
 # List failing PRs
 autoprat -r myorg/myrepo --failing-ci
 
-# View failure details
+# View failure details with log URLs
 autoprat -r myorg/myrepo --failing-ci --verbose
+
+# View failures with automatic error extraction
+autoprat -r myorg/myrepo --failing-ci -V
 
 # Comment on failing PRs
 autoprat -r myorg/myrepo --failing-ci \

@@ -89,6 +89,7 @@ func fetchPullRequests(repo string, debug bool) ([]PullRequest, error) {
 			AuthorLogin:       gqlPR.Author.Login,
 			URL:               gqlPR.URL,
 			StatusCheckRollup: gqlPR.StatusCheckRollup,
+			repo:              repo,
 		}
 		prs = append(prs, pr)
 	}

@@ -27,6 +27,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/frobware/autoprat/pr"
 	"github.com/frobware/autoprat/pr/actions"
+	"golang.org/x/term"
 )
 
 type CLI struct {
@@ -43,6 +44,8 @@ type CLI struct {
 	OkToTest       bool     `help:"Post /ok-to-test on PRs with needs-ok-to-test label (requires -X and --print)"`
 	Quiet          bool     `short:"q" help:"Print PR numbers only"`
 	Verbose        bool     `short:"v" help:"Print PR status only"`
+	VerboseVerbose bool     `short:"V" help:"Print PR status with error logs from failing checks"`
+	NoHyperlinks   bool     `help:"Disable terminal hyperlinks, show URLs explicitly"`
 	Repo           string   `required:"" short:"r" help:"GitHub repo (owner/repo)"`
 
 	NeedsApprove  bool `help:"Filter: only PRs missing the 'approved' label"`
@@ -169,9 +172,9 @@ func main() {
 		return
 	}
 
-	if cli.Verbose {
+	if cli.Verbose || cli.VerboseVerbose {
 		for _, pr := range prs {
-			printVerbosePR(pr)
+			printVerbosePR(pr, cli.VerboseVerbose, cli.NoHyperlinks)
 			fmt.Println()
 		}
 		return
@@ -208,7 +211,7 @@ func main() {
 	tw.Flush()
 }
 
-func printVerbosePR(pr pr.PullRequest) {
+func printVerbosePR(pr pr.PullRequest, showLogs bool, noHyperlinks bool) {
 	fmt.Printf("● %s\n", pr.URL)
 	fmt.Printf("├─Title: %s (%s)\n", pr.Title, pr.AuthorLogin)
 	fmt.Printf("├─PR #%d\n", pr.Number)
@@ -256,7 +259,31 @@ func printVerbosePR(pr pr.PullRequest) {
 			if conclusion == "" {
 				conclusion = check.State
 			}
-			fmt.Printf("  %s%s: %s\n", prefix, name, conclusion)
+			statusText := conclusion
+			url := check.DetailsUrl
+			if url == "" {
+				url = check.TargetUrl
+			}
+
+			supportsHyperlinks := !noHyperlinks && term.IsTerminal(int(os.Stdout.Fd())) && terminalSupportsHyperlinks()
+
+			if url != "" && supportsHyperlinks {
+				statusText = fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, conclusion)
+			}
+
+			fmt.Printf("  %s%s: %s\n", prefix, name, statusText)
+
+			if url != "" && !supportsHyperlinks {
+				fmt.Printf("    URL: %s\n", url)
+			}
+
+			if showLogs && (conclusion == "FAILURE" || check.State == "FAILURE") {
+				if logs, err := pr.FetchCheckLogs(check); err == nil && logs != "" {
+					fmt.Printf("    Error logs:\n%s\n", logs)
+				} else if err != nil {
+					fmt.Printf("    (Could not fetch logs: %v)\n", err)
+				}
+			}
 		}
 	}
 
@@ -313,4 +340,54 @@ func filterByLabelPresence(prs []pr.PullRequest, label string) []pr.PullRequest 
 		}
 	}
 	return filtered
+}
+
+// terminalSupportsHyperlinks detects if the terminal supports OSC 8 hyperlinks
+func terminalSupportsHyperlinks() bool {
+	term := os.Getenv("TERM")
+	termProgram := os.Getenv("TERM_PROGRAM")
+	terminalEmulator := os.Getenv("TERMINAL_EMULATOR")
+
+	supportedTerms := map[string]bool{
+		"xterm-kitty": true,
+		"foot":        true,
+		"foot-extra":  true,
+	}
+
+	supportedPrograms := map[string]bool{
+		"iTerm.app": true,
+		"vscode":    true,
+		"WezTerm":   true,
+	}
+
+	if supportedTerms[term] {
+		return true
+	}
+
+	if supportedPrograms[termProgram] {
+		return true
+	}
+
+	if terminalEmulator == "JetBrains-JediTerm" {
+		return true
+	}
+
+	if os.Getenv("VTE_VERSION") != "" {
+		return true
+	}
+
+	if os.Getenv("WT_SESSION") != "" {
+		return true
+	}
+
+	if strings.Contains(term, "gnome") ||
+		strings.Contains(term, "xterm-256color") && termProgram == "gnome-terminal-server" {
+		return true
+	}
+
+	if termProgram == "Alacritty" || term == "alacritty" {
+		return false
+	}
+
+	return false
 }

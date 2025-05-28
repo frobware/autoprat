@@ -12,6 +12,7 @@ type PullRequest struct {
 	URL               string
 	State             string
 	StatusCheckRollup StatusCheckRollup
+	repo              string
 }
 
 type StatusCheckRollup struct {
@@ -25,6 +26,8 @@ type StatusCheck struct {
 	Name       string `json:"name,omitempty"`
 	State      string `json:"state"`
 	Conclusion string `json:"conclusion,omitempty"`
+	DetailsUrl string `json:"detailsUrl,omitempty"`
+	TargetUrl  string `json:"targetUrl,omitempty"`
 }
 
 type LabelFilter struct {
