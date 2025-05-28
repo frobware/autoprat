@@ -34,7 +34,7 @@ autoprat -r owner/repo --needs-approve --approve --print | sh
 Using `go install`:
 
 ```bash
-go install github.com/frobware/autoprat/cmd/autoprat@latest
+go install github.com/frobware/autoprat@latest
 ```
 
 Or clone and build:
@@ -42,7 +42,7 @@ Or clone and build:
 ```bash
 git clone https://github.com/frobware/autoprat.git
 cd autoprat
-go build -o autoprat ./cmd/autoprat
+go build -o autoprat .
 ```
 
 ---

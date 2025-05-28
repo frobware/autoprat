@@ -47,8 +47,8 @@ go vet ./... > /dev/null 2>&1 || {
     exit 1
 }
 
-go build -v ./cmd/autoprat > /dev/null 2>&1 || {
-    go build -v ./cmd/autoprat
+go build -v . > /dev/null 2>&1 || {
+    go build -v .
     exit 1
 }
 
