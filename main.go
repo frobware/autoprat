@@ -31,24 +31,24 @@ import (
 )
 
 var (
-	repo           = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
-	printGHCommand = pflag.BoolP("print", "P", false, "Print gh commands for actions (instead of applying them)")
-	approve        = pflag.Bool("approve", false, "Post /approve comment on PRs without 'approved' label (requires --print)")
-	author         = pflag.StringP("author", "a", "", "Filter by author (exact match)")
-	authorFuzzy    = pflag.StringP("author-fuzzy", "A", "", "Fuzzy filter by author (LIKE match)")
-	comment        = pflag.StringSliceP("comment", "c", nil, "Comment to post")
-	debug          = pflag.Bool("debug", false, "Enable debug logging")
-	failingCI      = pflag.BoolP("failing-ci", "f", false, "Only show PRs with failing CI")
-	label          = pflag.StringSliceP("label", "l", nil, "Filter by label (prefix with ! to negate)")
-	lgtm           = pflag.Bool("lgtm", false, "Post /lgtm comment on PRs without 'lgtm' label (requires --print)")
-	okToTest       = pflag.Bool("ok-to-test", false, "Post /ok-to-test on PRs with needs-ok-to-test label (requires --print)")
-	quiet          = pflag.BoolP("quiet", "q", false, "Print PR numbers only")
-	verbose        = pflag.BoolP("verbose", "v", false, "Print PR status only")
-	verboseVerbose = pflag.BoolP("verbose-verbose", "V", false, "Print PR status with error logs from failing checks")
-	noHyperlinks   = pflag.Bool("no-hyperlinks", false, "Disable terminal hyperlinks, show URLs explicitly")
-	needsApprove   = pflag.Bool("needs-approve", false, "Filter: only PRs missing the 'approved' label")
-	needsLgtm      = pflag.Bool("needs-lgtm", false, "Filter: only PRs missing the 'lgtm' label")
-	needsOkToTest  = pflag.Bool("needs-ok-to-test", false, "Filter: only PRs that have the 'needs-ok-to-test' label")
+	repo            = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
+	printGHCommand  = pflag.BoolP("print", "P", false, "Print gh commands for actions (instead of applying them)")
+	approve         = pflag.Bool("approve", false, "Post /approve comment on PRs without 'approved' label (requires --print)")
+	author          = pflag.StringP("author", "a", "", "Filter by author (exact match)")
+	authorSubstring = pflag.StringP("author-substring", "A", "", "Filter by author containing text")
+	comment         = pflag.StringSliceP("comment", "c", nil, "Comment to post")
+	debug           = pflag.Bool("debug", false, "Enable debug logging")
+	failingCI       = pflag.BoolP("failing-ci", "f", false, "Only show PRs with failing CI")
+	label           = pflag.StringSliceP("label", "l", nil, "Filter by label (prefix with ! to negate)")
+	lgtm            = pflag.Bool("lgtm", false, "Post /lgtm comment on PRs without 'lgtm' label (requires --print)")
+	okToTest        = pflag.Bool("ok-to-test", false, "Post /ok-to-test on PRs with needs-ok-to-test label (requires --print)")
+	quiet           = pflag.BoolP("quiet", "q", false, "Print PR numbers only")
+	verbose         = pflag.BoolP("verbose", "v", false, "Print PR status only")
+	verboseVerbose  = pflag.BoolP("verbose-verbose", "V", false, "Print PR status with error logs from failing checks")
+	noHyperlinks    = pflag.Bool("no-hyperlinks", false, "Disable terminal hyperlinks, show URLs explicitly")
+	needsApprove    = pflag.Bool("needs-approve", false, "Filter: only PRs missing the 'approved' label")
+	needsLgtm       = pflag.Bool("needs-lgtm", false, "Filter: only PRs missing the 'lgtm' label")
+	needsOkToTest   = pflag.Bool("needs-ok-to-test", false, "Filter: only PRs that have the 'needs-ok-to-test' label")
 )
 
 func main() {
@@ -85,10 +85,10 @@ func main() {
 	}
 
 	filter := pr.Filter{
-		Labels:        labels,
-		Author:        *author,
-		AuthorFuzzy:   *authorFuzzy,
-		OnlyFailingCI: *failingCI,
+		Labels:          labels,
+		Author:          *author,
+		AuthorSubstring: *authorSubstring,
+		OnlyFailingCI:   *failingCI,
 	}
 
 	// Warn if --ok-to-test is used without --needs-ok-to-test and

@@ -38,8 +38,8 @@ func matchesFilter(pr PullRequest, filter Filter) bool {
 		return false
 	}
 
-	// Author fuzzy match
-	if filter.AuthorFuzzy != "" && !strings.Contains(pr.AuthorLogin, filter.AuthorFuzzy) {
+	// Author substring match
+	if filter.AuthorSubstring != "" && !strings.Contains(pr.AuthorLogin, filter.AuthorSubstring) {
 		return false
 	}
 

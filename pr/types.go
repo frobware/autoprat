@@ -37,8 +37,8 @@ type LabelFilter struct {
 
 // Filter expresses optional match criteria for PR selection.
 type Filter struct {
-	Author        string
-	AuthorFuzzy   string
-	Labels        []LabelFilter
-	OnlyFailingCI bool
+	Author          string
+	AuthorSubstring string
+	Labels          []LabelFilter
+	OnlyFailingCI   bool
 }

@@ -60,7 +60,7 @@ autoprat separates filtering from actions:
 
 ```
 --author <exact>        Filter by author (exact match)
---author-fuzzy <fuzzy>  Filter by author (substring match)
+--author-substring <text> Filter by author (substring match)
 --label <label>         Filter by label (prefix with ! to negate)
 --failing-ci            Only PRs with failing CI
 --needs-approve         Only PRs missing 'approved' label
@@ -116,7 +116,7 @@ autoprat separates filtering from actions:
 autoprat -r owner/repo --author "red-hat-konflux"
 
 # PRs from authors containing "bot"
-autoprat -r owner/repo --author-fuzzy "bot"
+autoprat -r owner/repo --author-substring "bot"
 
 # PRs with specific label
 autoprat -r owner/repo --label "kind/bug"
@@ -208,7 +208,7 @@ Required:
 
 Filters:
   -a, --author EXACT        Filter by author (exact match)
-  -A, --author-fuzzy FUZZY  Filter by author (substring)
+  -A, --author-substring TEXT Filter by author (substring)
   -l, --label LABEL         Filter by label (! prefix to negate)
   -f, --failing-ci          Only PRs with failing CI
   --needs-approve           Only PRs missing 'approved' label
