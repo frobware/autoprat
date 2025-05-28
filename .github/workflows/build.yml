@@ -19,5 +19,5 @@ jobs:
       with:
         go-version: ${{ matrix.go-version }}
 
-    - name: Run pre-commit checks
-      run: ./scripts/pre-commit
+    - name: Run CI checks and build
+      run: make ci
