@@ -201,13 +201,13 @@ autoprat -r owner/repo -V 123
 
 ```
 Usage:
-  autoprat -r OWNER/REPO [OPTIONS] [PR-NUMBER...]
+  autoprat [flags] [PR-NUMBER...]
 
 Required:
   -r, --repo OWNER/REPO     GitHub repository
 
 Filters:
-  --author EXACT            Filter by author (exact match)
+  -a, --author EXACT        Filter by author (exact match)
   -A, --author-fuzzy FUZZY  Filter by author (substring)
   -l, --label LABEL         Filter by label (! prefix to negate)
   -f, --failing-ci          Only PRs with failing CI
@@ -224,7 +224,7 @@ Actions:
 Output:
   -P, --print               Print gh commands (required for actions)
   -v, --verbose             Show PR details with clickable/copyable log URLs
-  -V                        Show PR details with automatic error log extraction
+  -V, --verbose-verbose     Show PR details with automatic error log extraction
   -q, --quiet               Show PR numbers only
   --no-hyperlinks           Force explicit URLs (for terminals without hyperlink support)
 

@@ -24,78 +24,80 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/alecthomas/kong"
 	"github.com/frobware/autoprat/pr"
 	"github.com/frobware/autoprat/pr/actions"
+	"github.com/spf13/pflag"
 	"golang.org/x/term"
 )
 
-type CLI struct {
-	PrintGHCommand bool     `short:"P" help:"Print gh commands for actions (instead of applying them)"`
-	Approve        bool     `help:"Post /approve comment on PRs without 'approved' label (requires --print)"`
-	Author         string   `short:"a" help:"Filter by author (exact match)" placeholder:"USERNAME"`
-	AuthorFuzzy    string   `short:"A" help:"Fuzzy filter by author (LIKE match)" placeholder:"PATTERN"`
-	Comment        []string `short:"c" help:"Comment to post"`
-	Debug          bool     `help:"Enable debug logging"`
-	FailingCI      bool     `short:"f" help:"Only show PRs with failing CI"`
-	Label          []string `short:"l" help:"Filter by label (prefix with ! to negate)"`
-	Lgtm           bool     `help:"Post /lgtm comment on PRs without 'lgtm' label (requires --print)"`
-	OkToTest       bool     `help:"Post /ok-to-test on PRs with needs-ok-to-test label (requires --print)"`
-	Quiet          bool     `short:"q" help:"Print PR numbers only"`
-	Verbose        bool     `short:"v" help:"Print PR status only"`
-	VerboseVerbose bool     `short:"V" help:"Print PR status with error logs from failing checks"`
-	NoHyperlinks   bool     `help:"Disable terminal hyperlinks, show URLs explicitly"`
-	Repo           string   `required:"" short:"r" help:"GitHub repo (owner/repo)" placeholder:"OWNER/REPO"`
-
-	NeedsApprove  bool `help:"Filter: only PRs missing the 'approved' label"`
-	NeedsLgtm     bool `help:"Filter: only PRs missing the 'lgtm' label"`
-	NeedsOkToTest bool `help:"Filter: only PRs that have the 'needs-ok-to-test' label"`
-
-	Args []string `arg:"" optional:"" name:"PR-NUMBER" help:"PR numbers (optional)"`
-}
+var (
+	repo           = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
+	printGHCommand = pflag.BoolP("print", "P", false, "Print gh commands for actions (instead of applying them)")
+	approve        = pflag.Bool("approve", false, "Post /approve comment on PRs without 'approved' label (requires --print)")
+	author         = pflag.StringP("author", "a", "", "Filter by author (exact match)")
+	authorFuzzy    = pflag.StringP("author-fuzzy", "A", "", "Fuzzy filter by author (LIKE match)")
+	comment        = pflag.StringSliceP("comment", "c", nil, "Comment to post")
+	debug          = pflag.Bool("debug", false, "Enable debug logging")
+	failingCI      = pflag.BoolP("failing-ci", "f", false, "Only show PRs with failing CI")
+	label          = pflag.StringSliceP("label", "l", nil, "Filter by label (prefix with ! to negate)")
+	lgtm           = pflag.Bool("lgtm", false, "Post /lgtm comment on PRs without 'lgtm' label (requires --print)")
+	okToTest       = pflag.Bool("ok-to-test", false, "Post /ok-to-test on PRs with needs-ok-to-test label (requires --print)")
+	quiet          = pflag.BoolP("quiet", "q", false, "Print PR numbers only")
+	verbose        = pflag.BoolP("verbose", "v", false, "Print PR status only")
+	verboseVerbose = pflag.BoolP("verbose-verbose", "V", false, "Print PR status with error logs from failing checks")
+	noHyperlinks   = pflag.Bool("no-hyperlinks", false, "Disable terminal hyperlinks, show URLs explicitly")
+	needsApprove   = pflag.Bool("needs-approve", false, "Filter: only PRs missing the 'approved' label")
+	needsLgtm      = pflag.Bool("needs-lgtm", false, "Filter: only PRs missing the 'lgtm' label")
+	needsOkToTest  = pflag.Bool("needs-ok-to-test", false, "Filter: only PRs that have the 'needs-ok-to-test' label")
+)
 
 func main() {
-	// Handle -help as an alias for --help
-	for i, arg := range os.Args {
-		if arg == "-help" {
-			os.Args[i] = "--help"
-			break
-		}
+	pflag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [flags] [PR-NUMBER ...]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "GitHub pull request automation tool\n\n")
+		pflag.PrintDefaults()
 	}
 
-	var cli CLI
-	kong.Parse(&cli)
+	pflag.Parse()
+
+	if *repo == "" {
+		fmt.Fprintf(os.Stderr, "Error: --repo is required\n\n")
+		pflag.Usage()
+		os.Exit(1)
+	}
+
+	prNumbers := pflag.Args()
 
 	// Convert label strings to LabelFilter with negation
 	// detection.
 	var labels []pr.LabelFilter
-	for _, rawLabel := range cli.Label {
+	for _, rawLabel := range *label {
 		negate := false
-		label := rawLabel
+		labelName := rawLabel
 		if strings.HasPrefix(rawLabel, "!") {
 			negate = true
-			label = strings.TrimPrefix(rawLabel, "!")
+			labelName = strings.TrimPrefix(rawLabel, "!")
 		}
 		labels = append(labels, pr.LabelFilter{
-			Name:   label,
+			Name:   labelName,
 			Negate: negate,
 		})
 	}
 
 	filter := pr.Filter{
 		Labels:        labels,
-		Author:        cli.Author,
-		AuthorFuzzy:   cli.AuthorFuzzy,
-		OnlyFailingCI: cli.FailingCI,
+		Author:        *author,
+		AuthorFuzzy:   *authorFuzzy,
+		OnlyFailingCI: *failingCI,
 	}
 
 	// Warn if --ok-to-test is used without --needs-ok-to-test and
 	// not printing commands.
-	if cli.OkToTest && !cli.NeedsOkToTest && !cli.PrintGHCommand {
+	if *okToTest && !*needsOkToTest && !*printGHCommand {
 		fmt.Fprintf(os.Stderr, "Hint: --ok-to-test is an action, not a filter. Use --needs-ok-to-test to filter eligible PRs.\n")
 	}
 
-	client, err := pr.NewClient(cli.Repo)
+	client, err := pr.NewClient(*repo)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}
@@ -105,17 +107,15 @@ func main() {
 		log.Fatalf("failed to list PRs: %v", err)
 	}
 
-	if cli.NeedsApprove {
+	if *needsApprove {
 		prs = filterByLabelAbsence(prs, "approved")
 	}
-	if cli.NeedsLgtm {
+	if *needsLgtm {
 		prs = filterByLabelAbsence(prs, "lgtm")
 	}
-	if cli.NeedsOkToTest {
+	if *needsOkToTest {
 		prs = filterByLabelPresence(prs, "needs-ok-to-test")
 	}
-
-	prNumbers := cli.Args
 
 	if len(prNumbers) > 0 {
 		selected := make(map[int]struct{}, len(prNumbers))
@@ -138,14 +138,14 @@ func main() {
 
 	var allActions []actions.Action
 
-	for _, comment := range cli.Comment {
+	for _, c := range *comment {
 		allActions = append(allActions, actions.Action{
-			Comment:   comment,
+			Comment:   c,
 			Predicate: actions.PredicateNone,
 		})
 	}
 
-	if cli.OkToTest && cli.PrintGHCommand {
+	if *okToTest && *printGHCommand {
 		allActions = append(allActions, actions.Action{
 			Comment:   "/ok-to-test",
 			Label:     "needs-ok-to-test",
@@ -153,7 +153,7 @@ func main() {
 		})
 	}
 
-	if cli.Lgtm && cli.PrintGHCommand {
+	if *lgtm && *printGHCommand {
 		allActions = append(allActions, actions.Action{
 			Comment:   "/lgtm",
 			Label:     "lgtm",
@@ -161,7 +161,7 @@ func main() {
 		})
 	}
 
-	if cli.Approve && cli.PrintGHCommand {
+	if *approve && *printGHCommand {
 		allActions = append(allActions, actions.Action{
 			Comment:   "/approve",
 			Label:     "approved",
@@ -169,25 +169,25 @@ func main() {
 		})
 	}
 
-	if cli.PrintGHCommand {
+	if *printGHCommand {
 		for _, pr := range prs {
 			toPost := actions.FilterActions(allActions, pr.Labels)
 			for _, a := range toPost {
-				fmt.Println(a.Command(cli.Repo, pr.Number))
+				fmt.Println(a.Command(*repo, pr.Number))
 			}
 		}
 		return
 	}
 
-	if cli.Verbose || cli.VerboseVerbose {
+	if *verbose || *verboseVerbose {
 		for _, pr := range prs {
-			printVerbosePR(pr, cli.VerboseVerbose, cli.NoHyperlinks)
+			printVerbosePR(pr, *verboseVerbose, *noHyperlinks)
 			fmt.Println()
 		}
 		return
 	}
 
-	if cli.Quiet {
+	if *quiet {
 		for _, pr := range prs {
 			fmt.Println(pr.Number)
 		}

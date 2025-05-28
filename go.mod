@@ -3,8 +3,8 @@ module github.com/frobware/autoprat
 go 1.24.3
 
 require (
-	github.com/alecthomas/kong v1.11.0
 	github.com/cli/go-gh v1.2.1
+	github.com/spf13/pflag v1.0.6
 	golang.org/x/term v0.5.0
 )
 
