@@ -33,11 +33,11 @@ import (
 type CLI struct {
 	PrintGHCommand bool     `short:"P" help:"Print gh commands for actions (instead of applying them)"`
 	Approve        bool     `help:"Post /approve comment on PRs without 'approved' label (requires --print)"`
-	Author         string   `short:"a" help:"Filter by author (exact match)"`
-	AuthorFuzzy    string   `short:"A" help:"Fuzzy filter by author (LIKE match)"`
+	Author         string   `short:"a" help:"Filter by author (exact match)" placeholder:"USERNAME"`
+	AuthorFuzzy    string   `short:"A" help:"Fuzzy filter by author (LIKE match)" placeholder:"PATTERN"`
 	Comment        []string `short:"c" help:"Comment to post"`
 	Debug          bool     `help:"Enable debug logging"`
-	Exec           []string `short:"X" help:"Explicit action (e.g. comment:/retest)"`
+	Exec           []string `short:"X" help:"Explicit action (e.g. comment:/retest)" placeholder:"ACTION"`
 	FailingCI      bool     `short:"f" help:"Only show PRs with failing CI"`
 	Label          []string `short:"l" help:"Filter by label (prefix with ! to negate)"`
 	Lgtm           bool     `help:"Post /lgtm comment on PRs without 'lgtm' label (requires --print)"`
@@ -46,13 +46,13 @@ type CLI struct {
 	Verbose        bool     `short:"v" help:"Print PR status only"`
 	VerboseVerbose bool     `short:"V" help:"Print PR status with error logs from failing checks"`
 	NoHyperlinks   bool     `help:"Disable terminal hyperlinks, show URLs explicitly"`
-	Repo           string   `required:"" short:"r" help:"GitHub repo (owner/repo)"`
+	Repo           string   `required:"" short:"r" help:"GitHub repo (owner/repo)" placeholder:"OWNER/REPO"`
 
 	NeedsApprove  bool `help:"Filter: only PRs missing the 'approved' label"`
 	NeedsLgtm     bool `help:"Filter: only PRs missing the 'lgtm' label"`
 	NeedsOkToTest bool `help:"Filter: only PRs that have the 'needs-ok-to-test' label"`
 
-	Args []string `arg:"" optional:"" name:"pr-numbers" help:"PR numbers (optional)"`
+	Args []string `arg:"" optional:"" name:"PR-NUMBER" help:"PR numbers (optional)"`
 }
 
 func main() {
