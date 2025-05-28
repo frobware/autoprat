@@ -54,7 +54,11 @@ var (
 func main() {
 	pflag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] [PR-NUMBER ...]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "List and filter open GitHub pull requests\n\n")
+		fmt.Fprintf(os.Stderr, `List and filter open GitHub pull requests. Filter PRs and generate gh
+commands to apply /lgtm, /approve, /ok-to-test, and custom comments.
+
+`)
+
 		pflag.PrintDefaults()
 	}
 
