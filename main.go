@@ -50,7 +50,7 @@ var (
 	needsApprove    = pflag.Bool("needs-approve", false, "Include only PRs missing the 'approved' label")
 	needsLgtm       = pflag.Bool("needs-lgtm", false, "Include only PRs missing the 'lgtm' label")
 	needsOkToTest   = pflag.Bool("needs-ok-to-test", false, "Include only PRs that have the 'needs-ok-to-test' label")
-	showVersion     = pflag.Bool("version", false, "Show version information")
+	showVersion     = pflag.Bool("version", false, fmt.Sprintf("Show version information (current: %s)", version))
 )
 
 func main() {
