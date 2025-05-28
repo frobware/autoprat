@@ -31,6 +31,7 @@ import (
 )
 
 var (
+	version         = "dev"
 	repo            = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
 	printGHCommand  = pflag.BoolP("print", "P", false, "Print as gh commands")
 	approve         = pflag.Bool("approve", false, "Generate /approve commands for PRs without 'approved' label")
@@ -49,6 +50,7 @@ var (
 	needsApprove    = pflag.Bool("needs-approve", false, "Include only PRs missing the 'approved' label")
 	needsLgtm       = pflag.Bool("needs-lgtm", false, "Include only PRs missing the 'lgtm' label")
 	needsOkToTest   = pflag.Bool("needs-ok-to-test", false, "Include only PRs that have the 'needs-ok-to-test' label")
+	showVersion     = pflag.Bool("version", false, "Show version information")
 )
 
 func main() {
@@ -65,6 +67,11 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 	}
 
 	pflag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	if *repo == "" {
 		fmt.Fprintf(os.Stderr, "Error: --repo is required\n\n")
