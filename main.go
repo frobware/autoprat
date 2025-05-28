@@ -37,11 +37,10 @@ type CLI struct {
 	AuthorFuzzy    string   `short:"A" help:"Fuzzy filter by author (LIKE match)" placeholder:"PATTERN"`
 	Comment        []string `short:"c" help:"Comment to post"`
 	Debug          bool     `help:"Enable debug logging"`
-	Exec           []string `short:"X" help:"Explicit action (e.g. comment:/retest)" placeholder:"ACTION"`
 	FailingCI      bool     `short:"f" help:"Only show PRs with failing CI"`
 	Label          []string `short:"l" help:"Filter by label (prefix with ! to negate)"`
 	Lgtm           bool     `help:"Post /lgtm comment on PRs without 'lgtm' label (requires --print)"`
-	OkToTest       bool     `help:"Post /ok-to-test on PRs with needs-ok-to-test label (requires -X and --print)"`
+	OkToTest       bool     `help:"Post /ok-to-test on PRs with needs-ok-to-test label (requires --print)"`
 	Quiet          bool     `short:"q" help:"Print PR numbers only"`
 	Verbose        bool     `short:"v" help:"Print PR status only"`
 	VerboseVerbose bool     `short:"V" help:"Print PR status with error logs from failing checks"`
