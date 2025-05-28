@@ -79,6 +79,11 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 		os.Exit(1)
 	}
 
+	if (*approve || *lgtm || *okToTest || len(*comment) > 0) && !*printGHCommand {
+		fmt.Fprintf(os.Stderr, "Error: action flags require -P/--print flag\n")
+		os.Exit(1)
+	}
+
 	prNumbers := pflag.Args()
 
 	// Convert label strings to LabelFilter with negation
@@ -108,6 +113,11 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 	// not printing commands.
 	if *okToTest && !*needsOkToTest && !*printGHCommand {
 		fmt.Fprintf(os.Stderr, "Hint: --ok-to-test is an action, not a filter. Use --needs-ok-to-test to filter eligible PRs.\n")
+	}
+
+	// Warn if action flags are used without -P flag.
+	if !*printGHCommand && (*approve || *lgtm || *okToTest || len(*comment) > 0) {
+		fmt.Fprintf(os.Stderr, "Warning: Action flags (--approve, --lgtm, --ok-to-test, --comment) require -P/--print to generate gh commands.\n")
 	}
 
 	client, err := pr.NewClient(*repo)

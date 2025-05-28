@@ -70,6 +70,8 @@ autoprat separates filtering from actions:
 
 ### Action Options
 
+All action flags require `-P/--print` to generate commands:
+
 ```
 --approve               Post /approve comment
 --lgtm                  Post /lgtm comment
