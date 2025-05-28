@@ -32,30 +32,32 @@ import (
 
 var (
 	repo            = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
-	printGHCommand  = pflag.BoolP("print", "P", false, "Print gh commands for actions (instead of applying them)")
-	approve         = pflag.Bool("approve", false, "Post /approve comment on PRs without 'approved' label (requires --print)")
+	printGHCommand  = pflag.BoolP("print", "P", false, "Print as gh commands")
+	approve         = pflag.Bool("approve", false, "Generate /approve commands for PRs without 'approved' label")
 	author          = pflag.StringP("author", "a", "", "Filter by author (exact match)")
 	authorSubstring = pflag.StringP("author-substring", "A", "", "Filter by author containing text")
-	comment         = pflag.StringSliceP("comment", "c", nil, "Comment to post")
+	comment         = pflag.StringSliceP("comment", "c", nil, "Generate comment commands")
 	debug           = pflag.Bool("debug", false, "Enable debug logging")
 	failingCI       = pflag.BoolP("failing-ci", "f", false, "Only show PRs with failing CI")
 	label           = pflag.StringSliceP("label", "l", nil, "Filter by label (prefix with ! to negate)")
-	lgtm            = pflag.Bool("lgtm", false, "Post /lgtm comment on PRs without 'lgtm' label (requires --print)")
-	okToTest        = pflag.Bool("ok-to-test", false, "Post /ok-to-test on PRs with needs-ok-to-test label (requires --print)")
+	lgtm            = pflag.Bool("lgtm", false, "Generate /lgtm commands for PRs without 'lgtm' label")
+	okToTest        = pflag.Bool("ok-to-test", false, "Generate /ok-to-test commands for PRs with needs-ok-to-test label")
 	quiet           = pflag.BoolP("quiet", "q", false, "Print PR numbers only")
 	verbose         = pflag.BoolP("verbose", "v", false, "Print PR status only")
 	verboseVerbose  = pflag.BoolP("verbose-verbose", "V", false, "Print PR status with error logs from failing checks")
 	noHyperlinks    = pflag.Bool("no-hyperlinks", false, "Disable terminal hyperlinks, show URLs explicitly")
-	needsApprove    = pflag.Bool("needs-approve", false, "Filter: only PRs missing the 'approved' label")
-	needsLgtm       = pflag.Bool("needs-lgtm", false, "Filter: only PRs missing the 'lgtm' label")
-	needsOkToTest   = pflag.Bool("needs-ok-to-test", false, "Filter: only PRs that have the 'needs-ok-to-test' label")
+	needsApprove    = pflag.Bool("needs-approve", false, "Include only PRs missing the 'approved' label")
+	needsLgtm       = pflag.Bool("needs-lgtm", false, "Include only PRs missing the 'lgtm' label")
+	needsOkToTest   = pflag.Bool("needs-ok-to-test", false, "Include only PRs that have the 'needs-ok-to-test' label")
 )
 
 func main() {
 	pflag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] [PR-NUMBER ...]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, `List and filter open GitHub pull requests. Filter PRs and generate gh
-commands to apply /lgtm, /approve, /ok-to-test, and custom comments.
+		fmt.Fprintf(os.Stderr, `List and filter open GitHub pull requests.
+
+Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
+/ok-to-test, and custom comments.
 
 `)
 
