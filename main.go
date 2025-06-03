@@ -262,30 +262,30 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 	tw.Flush()
 }
 
-func printVerbosePR(pr pr.PullRequest, showLogs bool, noHyperlinks bool) {
-	fmt.Printf("● %s\n", pr.URL)
-	fmt.Printf("├─Title: %s (%s)\n", pr.Title, pr.AuthorLogin)
-	fmt.Printf("├─PR #%d\n", pr.Number)
-	fmt.Printf("├─State: %s\n", pr.State)
-	fmt.Printf("├─Created: %s\n", pr.CreatedAt)
+func printVerbosePR(prItem pr.PullRequest, showLogs bool, noHyperlinks bool) {
+	fmt.Printf("● %s\n", prItem.URL)
+	fmt.Printf("├─Title: %s (%s)\n", prItem.Title, prItem.AuthorLogin)
+	fmt.Printf("├─PR #%d\n", prItem.Number)
+	fmt.Printf("├─State: %s\n", prItem.State)
+	fmt.Printf("├─Created: %s\n", prItem.CreatedAt)
 	fmt.Printf("├─Status\n")
 
-	approved := contains(pr.Labels, "approved")
-	lgtm := contains(pr.Labels, "lgtm")
-	okToTest := contains(pr.Labels, "needs-ok-to-test")
+	approved := contains(prItem.Labels, "approved")
+	lgtm := contains(prItem.Labels, "lgtm")
+	okToTest := contains(prItem.Labels, "needs-ok-to-test")
 
 	fmt.Printf("│ ├─Approved: %s\n", yesNo(approved))
-	fmt.Printf("│ ├─CI: %s\n", summarizeCIStatus(pr.StatusCheckRollup.Contexts.Nodes))
+	fmt.Printf("│ ├─CI: %s\n", summarizeCIStatus(prItem.StatusCheckRollup.Contexts.Nodes))
 	fmt.Printf("│ ├─LGTM: %s\n", yesNo(lgtm))
 	fmt.Printf("│ └─OK-to-test: %s\n", yesNo(!okToTest))
 
 	fmt.Printf("├─Labels\n")
-	if len(pr.Labels) == 0 {
+	if len(prItem.Labels) == 0 {
 		fmt.Printf("│ └─None\n")
 	} else {
-		for i, label := range pr.Labels {
+		for i, label := range prItem.Labels {
 			prefix := "│ ├─"
-			if i == len(pr.Labels)-1 {
+			if i == len(prItem.Labels)-1 {
 				prefix = "│ └─"
 			}
 			fmt.Printf("%s%s\n", prefix, label)
@@ -293,46 +293,175 @@ func printVerbosePR(pr pr.PullRequest, showLogs bool, noHyperlinks bool) {
 	}
 
 	fmt.Printf("└─Checks\n")
-	checks := pr.StatusCheckRollup.Contexts.Nodes
+	checks := prItem.StatusCheckRollup.Contexts.Nodes
 	if len(checks) == 0 {
 		fmt.Println("  └─None")
 	} else {
-		for i, check := range checks {
-			prefix := "├─"
-			if i == len(checks)-1 {
-				prefix = "└─"
-			}
-			name := check.Name
-			if name == "" {
-				name = check.Context
-			}
+		// Group checks by status
+		checksByStatus := make(map[string][]pr.StatusCheck)
+		statusOrder := []string{"FAILURE", "PENDING", "SUCCESS"}
+
+		for _, check := range checks {
 			conclusion := check.Conclusion
 			if conclusion == "" {
 				conclusion = check.State
 			}
-			statusText := conclusion
-			url := check.DetailsUrl
-			if url == "" {
-				url = check.TargetUrl
+			if conclusion == "" {
+				conclusion = "UNKNOWN"
+			}
+			checksByStatus[conclusion] = append(checksByStatus[conclusion], check)
+		}
+
+		groupIndex := 0
+		totalGroups := 0
+		for _, status := range statusOrder {
+			if len(checksByStatus[status]) > 0 {
+				totalGroups++
+			}
+		}
+		// Add any other statuses not in our predefined order
+		for status := range checksByStatus {
+			found := false
+			for _, knownStatus := range statusOrder {
+				if status == knownStatus {
+					found = true
+					break
+				}
+			}
+			if !found {
+				totalGroups++
+			}
+		}
+
+		for _, status := range statusOrder {
+			if len(checksByStatus[status]) == 0 {
+				continue
 			}
 
-			supportsHyperlinks := !noHyperlinks && term.IsTerminal(int(os.Stdout.Fd())) && terminalSupportsHyperlinks()
-
-			if url != "" && supportsHyperlinks {
-				statusText = fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, conclusion)
+			groupIndex++
+			groupPrefix := "├─"
+			if groupIndex == totalGroups {
+				groupPrefix = "└─"
 			}
 
-			fmt.Printf("  %s%s: %s\n", prefix, name, statusText)
+			fmt.Printf("  %s%s (%d)\n", groupPrefix, status, len(checksByStatus[status]))
 
-			if url != "" && !supportsHyperlinks {
-				fmt.Printf("    URL: %s\n", url)
+			for i, check := range checksByStatus[status] {
+				itemPrefix := "│ ├─"
+				if groupIndex == totalGroups && i == len(checksByStatus[status])-1 {
+					itemPrefix = "│ └─"
+				} else if i == len(checksByStatus[status])-1 {
+					itemPrefix = "│ └─"
+				}
+
+				name := check.Name
+				if name == "" {
+					name = check.Context
+				}
+
+				url := check.DetailsUrl
+				if url == "" {
+					url = check.TargetUrl
+				}
+
+				supportsHyperlinks := !noHyperlinks && term.IsTerminal(int(os.Stdout.Fd())) && terminalSupportsHyperlinks()
+
+				if url != "" && supportsHyperlinks {
+					nameText := fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, name)
+					fmt.Printf("  %s%s\n", itemPrefix, nameText)
+				} else {
+					fmt.Printf("  %s%s\n", itemPrefix, name)
+					if url != "" {
+						urlPrefix := "│ │   └─"
+						if groupIndex == totalGroups && i == len(checksByStatus[status])-1 {
+							urlPrefix = "    └─"
+						} else if i == len(checksByStatus[status])-1 {
+							urlPrefix = "│   └─"
+						}
+						fmt.Printf("  %sURL: %s\n", urlPrefix, url)
+					}
+				}
+
+				if showLogs && status == "FAILURE" {
+					if logs, err := prItem.FetchCheckLogs(check); err == nil && logs != "" {
+						fmt.Printf("    │ Error logs:\n%s\n", logs)
+					} else if err != nil {
+						fmt.Printf("    │ (Could not fetch logs: %v)\n", err)
+					}
+				}
 			}
+		}
 
-			if showLogs && (conclusion == "FAILURE" || check.State == "FAILURE") {
-				if logs, err := pr.FetchCheckLogs(check); err == nil && logs != "" {
-					fmt.Printf("    Error logs:\n%s\n", logs)
-				} else if err != nil {
-					fmt.Printf("    (Could not fetch logs: %v)\n", err)
+		// Handle any other statuses not in our predefined order
+		for status := range checksByStatus {
+			found := false
+			for _, knownStatus := range statusOrder {
+				if status == knownStatus {
+					found = true
+					break
+				}
+			}
+			if !found && len(checksByStatus[status]) > 0 {
+				groupIndex++
+				groupPrefix := "├─"
+				if groupIndex == totalGroups {
+					groupPrefix = "└─"
+				}
+
+				fmt.Printf("  %s%s (%d)\n", groupPrefix, status, len(checksByStatus[status]))
+
+				for i, check := range checksByStatus[status] {
+					itemPrefix := "│ ├─"
+					if groupIndex == totalGroups {
+						// This is the last group
+						if i == len(checksByStatus[status])-1 {
+							itemPrefix = "  └─"
+						} else {
+							itemPrefix = "  ├─"
+						}
+					} else if i == len(checksByStatus[status])-1 {
+						itemPrefix = "│ └─"
+					}
+
+					name := check.Name
+					if name == "" {
+						name = check.Context
+					}
+
+					url := check.DetailsUrl
+					if url == "" {
+						url = check.TargetUrl
+					}
+
+					supportsHyperlinks := !noHyperlinks && term.IsTerminal(int(os.Stdout.Fd())) && terminalSupportsHyperlinks()
+
+					if url != "" && supportsHyperlinks {
+						nameText := fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, name)
+						fmt.Printf("  %s%s\n", itemPrefix, nameText)
+					} else {
+						fmt.Printf("  %s%s\n", itemPrefix, name)
+						if url != "" {
+							urlPrefix := "│ │   └─"
+							if groupIndex == totalGroups {
+								if i == len(checksByStatus[status])-1 {
+									urlPrefix = "    └─"
+								} else {
+									urlPrefix = "  │   └─"
+								}
+							} else if i == len(checksByStatus[status])-1 {
+								urlPrefix = "│   └─"
+							}
+							fmt.Printf("  %sURL: %s\n", urlPrefix, url)
+						}
+					}
+
+					if showLogs && status == "FAILURE" {
+						if logs, err := prItem.FetchCheckLogs(check); err == nil && logs != "" {
+							fmt.Printf("    │ Error logs:\n%s\n", logs)
+						} else if err != nil {
+							fmt.Printf("    │ (Could not fetch logs: %v)\n", err)
+						}
+					}
 				}
 			}
 		}
