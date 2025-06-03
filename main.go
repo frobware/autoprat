@@ -25,8 +25,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/frobware/autoprat/pr"
-	"github.com/frobware/autoprat/pr/actions"
+	"github.com/frobware/autoprat/github"
+	"github.com/frobware/autoprat/github/actions"
 	"github.com/spf13/pflag"
 	"golang.org/x/term"
 )
@@ -91,7 +91,7 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 
 	// Convert label strings to LabelFilter with negation
 	// detection.
-	var labels []pr.LabelFilter
+	var labels []github.LabelFilter
 	for _, rawLabel := range *label {
 		negate := false
 		labelName := rawLabel
@@ -99,13 +99,13 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 			negate = true
 			labelName = strings.TrimPrefix(rawLabel, "!")
 		}
-		labels = append(labels, pr.LabelFilter{
+		labels = append(labels, github.LabelFilter{
 			Name:   labelName,
 			Negate: negate,
 		})
 	}
 
-	filter := pr.Filter{
+	filter := github.Filter{
 		Labels:          labels,
 		Author:          *author,
 		AuthorSubstring: *authorSubstring,
@@ -124,7 +124,7 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 		fmt.Fprintf(os.Stderr, "Warning: Action flags (--approve, --lgtm, --ok-to-test, --comment) require -P/--print to generate gh commands.\n")
 	}
 
-	client, err := pr.NewClient(*repo)
+	client, err := github.NewClient(*repo)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}
@@ -201,7 +201,7 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 			toPost := actions.FilterActions(allActions, prItem.Labels)
 			for _, a := range toPost {
 				// Check throttling if specified
-				if *throttle > 0 && pr.HasRecentComment(prItem, a.Comment, *throttle) {
+				if *throttle > 0 && github.HasRecentComment(prItem, a.Comment, *throttle) {
 					if *debug {
 						fmt.Fprintf(os.Stderr, "Skipping comment for PR #%d: recent duplicate found (throttle: %v)\n", prItem.Number, *throttle)
 					}
@@ -262,7 +262,7 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 	tw.Flush()
 }
 
-func printVerbosePR(prItem pr.PullRequest, showLogs bool, noHyperlinks bool) {
+func printVerbosePR(prItem github.PullRequest, showLogs bool, noHyperlinks bool) {
 	fmt.Printf("● %s\n", prItem.URL)
 	fmt.Printf("├─Title: %s (%s)\n", prItem.Title, prItem.AuthorLogin)
 	fmt.Printf("├─PR #%d\n", prItem.Number)
@@ -298,7 +298,7 @@ func printVerbosePR(prItem pr.PullRequest, showLogs bool, noHyperlinks bool) {
 		fmt.Println("  └─None")
 	} else {
 		// Group checks by status
-		checksByStatus := make(map[string][]pr.StatusCheck)
+		checksByStatus := make(map[string][]github.StatusCheck)
 		statusOrder := []string{"FAILURE", "PENDING", "SUCCESS"}
 
 		for _, check := range checks {
@@ -480,7 +480,7 @@ func yesNo(b bool) string {
 	return "No"
 }
 
-func summarizeCIStatus(checks []pr.StatusCheck) string {
+func summarizeCIStatus(checks []github.StatusCheck) string {
 	for _, c := range checks {
 		st := c.State
 		if st == "" {
@@ -502,7 +502,7 @@ func summarizeCIStatus(checks []pr.StatusCheck) string {
 	return "Passing"
 }
 
-func filterByLabelAbsence(prs []pr.PullRequest, label string) []pr.PullRequest {
+func filterByLabelAbsence(prs []github.PullRequest, label string) []github.PullRequest {
 	filtered := prs[:0]
 	for _, pr := range prs {
 		if !contains(pr.Labels, label) {
@@ -512,7 +512,7 @@ func filterByLabelAbsence(prs []pr.PullRequest, label string) []pr.PullRequest {
 	return filtered
 }
 
-func filterByLabelPresence(prs []pr.PullRequest, label string) []pr.PullRequest {
+func filterByLabelPresence(prs []github.PullRequest, label string) []github.PullRequest {
 	filtered := prs[:0]
 	for _, pr := range prs {
 		if contains(pr.Labels, label) {
@@ -573,7 +573,7 @@ func terminalSupportsHyperlinks() bool {
 }
 
 // printThrottleDiagnostics shows what the throttling logic would do for debugging
-func printThrottleDiagnostics(prItem pr.PullRequest, allActions []actions.Action) {
+func printThrottleDiagnostics(prItem github.PullRequest, allActions []actions.Action) {
 	toPost := actions.FilterActions(allActions, prItem.Labels)
 	if len(toPost) == 0 {
 		return
@@ -609,7 +609,7 @@ func printThrottleDiagnostics(prItem pr.PullRequest, allActions []actions.Action
 
 	fmt.Printf("│ └─Action Analysis:\n")
 	for i, a := range toPost {
-		hasRecent := pr.HasRecentComment(prItem, a.Comment, *throttle)
+		hasRecent := github.HasRecentComment(prItem, a.Comment, *throttle)
 		status := "✓ Would post"
 		if hasRecent {
 			status = "✗ Throttled (recent duplicate)"
@@ -625,7 +625,7 @@ func printThrottleDiagnostics(prItem pr.PullRequest, allActions []actions.Action
 }
 
 // getLastCommentTime returns when any comment was last posted on the PR
-func getLastCommentTime(prItem pr.PullRequest) string {
+func getLastCommentTime(prItem github.PullRequest) string {
 	if len(prItem.Comments) == 0 {
 		return "never"
 	}

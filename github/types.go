@@ -1,4 +1,4 @@
-package pr
+package github
 
 // PullRequest represents a minimal view of a GitHub PR for filtering,
 // listing, and acting on.

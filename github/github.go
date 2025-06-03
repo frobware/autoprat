@@ -1,4 +1,4 @@
-package pr
+package github
 
 import (
 	"encoding/json"
