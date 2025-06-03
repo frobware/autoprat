@@ -17,12 +17,14 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"log"
 	"os"
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"text/template"
 	"time"
 
 	"github.com/frobware/autoprat/github"
@@ -30,6 +32,9 @@ import (
 	"github.com/spf13/pflag"
 	"golang.org/x/term"
 )
+
+//go:embed templates/verbose.tmpl
+var verboseTemplate string
 
 var (
 	version         = "dev"
@@ -262,45 +267,42 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 	tw.Flush()
 }
 
-func printVerbosePR(prItem github.PullRequest, showLogs bool, noHyperlinks bool) {
-	fmt.Printf("● %s\n", prItem.URL)
-	fmt.Printf("├─Title: %s (%s)\n", prItem.Title, prItem.AuthorLogin)
-	fmt.Printf("├─PR #%d\n", prItem.Number)
-	fmt.Printf("├─State: %s\n", prItem.State)
-	fmt.Printf("├─Created: %s\n", prItem.CreatedAt)
-	fmt.Printf("├─Status\n")
+// Template data structure for verbose PR output
+type TemplateData struct {
+	github.PullRequest
+	ShowLogs     bool
+	NoHyperlinks bool
+	PR           github.PullRequest // For nested access in templates
+}
 
-	approved := contains(prItem.Labels, "approved")
-	lgtm := contains(prItem.Labels, "lgtm")
-	okToTest := contains(prItem.Labels, "needs-ok-to-test")
-
-	fmt.Printf("│ ├─Approved: %s\n", yesNo(approved))
-	fmt.Printf("│ ├─CI: %s\n", summarizeCIStatus(prItem.StatusCheckRollup.Contexts.Nodes))
-	fmt.Printf("│ ├─LGTM: %s\n", yesNo(lgtm))
-	fmt.Printf("│ └─OK-to-test: %s\n", yesNo(!okToTest))
-
-	fmt.Printf("├─Labels\n")
-	if len(prItem.Labels) == 0 {
-		fmt.Printf("│ └─None\n")
-	} else {
-		for i, label := range prItem.Labels {
-			prefix := "│ ├─"
-			if i == len(prItem.Labels)-1 {
-				prefix = "│ └─"
-			}
-			fmt.Printf("%s%s\n", prefix, label)
+// Template helper functions
+var templateFuncs = template.FuncMap{
+	"yesNo": func(b bool) string {
+		if b {
+			return "Yes"
 		}
-	}
-
-	fmt.Printf("└─Checks\n")
-	checks := prItem.StatusCheckRollup.Contexts.Nodes
-	if len(checks) == 0 {
-		fmt.Println("  └─None")
-	} else {
-		// Group checks by status
+		return "No"
+	},
+	"hasLabel": func(labels []string, target string) bool {
+		return slices.Contains(labels, target)
+	},
+	"not": func(b bool) bool {
+		return !b
+	},
+	"ciStatus": func(checks []github.StatusCheck) string {
+		return summarizeCIStatus(checks)
+	},
+	"sub": func(a, b int) int {
+		return a - b
+	},
+	"add": func(a, b int) int {
+		return a + b
+	},
+	"slice": func(items ...string) []string {
+		return items
+	},
+	"groupChecksByStatus": func(checks []github.StatusCheck) map[string][]github.StatusCheck {
 		checksByStatus := make(map[string][]github.StatusCheck)
-		statusOrder := []string{"FAILURE", "PENDING", "SUCCESS"}
-
 		for _, check := range checks {
 			conclusion := check.Conclusion
 			if conclusion == "" {
@@ -311,8 +313,9 @@ func printVerbosePR(prItem github.PullRequest, showLogs bool, noHyperlinks bool)
 			}
 			checksByStatus[conclusion] = append(checksByStatus[conclusion], check)
 		}
-
-		groupIndex := 0
+		return checksByStatus
+	},
+	"countGroups": func(checksByStatus map[string][]github.StatusCheck, statusOrder []string) int {
 		totalGroups := 0
 		for _, status := range statusOrder {
 			if len(checksByStatus[status]) > 0 {
@@ -328,145 +331,56 @@ func printVerbosePR(prItem github.PullRequest, showLogs bool, noHyperlinks bool)
 					break
 				}
 			}
-			if !found {
+			if !found && len(checksByStatus[status]) > 0 {
 				totalGroups++
 			}
 		}
-
-		for _, status := range statusOrder {
-			if len(checksByStatus[status]) == 0 {
-				continue
-			}
-
-			groupIndex++
-			groupPrefix := "├─"
-			if groupIndex == totalGroups {
-				groupPrefix = "└─"
-			}
-
-			fmt.Printf("  %s%s (%d)\n", groupPrefix, status, len(checksByStatus[status]))
-
-			for i, check := range checksByStatus[status] {
-				itemPrefix := "│ ├─"
-				if groupIndex == totalGroups && i == len(checksByStatus[status])-1 {
-					itemPrefix = "│ └─"
-				} else if i == len(checksByStatus[status])-1 {
-					itemPrefix = "│ └─"
-				}
-
-				name := check.Name
-				if name == "" {
-					name = check.Context
-				}
-
-				url := check.DetailsUrl
-				if url == "" {
-					url = check.TargetUrl
-				}
-
-				supportsHyperlinks := !noHyperlinks && term.IsTerminal(int(os.Stdout.Fd())) && terminalSupportsHyperlinks()
-
-				if url != "" && supportsHyperlinks {
-					nameText := fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, name)
-					fmt.Printf("  %s%s\n", itemPrefix, nameText)
-				} else {
-					fmt.Printf("  %s%s\n", itemPrefix, name)
-					if url != "" {
-						urlPrefix := "│ │   └─"
-						if groupIndex == totalGroups && i == len(checksByStatus[status])-1 {
-							urlPrefix = "    └─"
-						} else if i == len(checksByStatus[status])-1 {
-							urlPrefix = "│   └─"
-						}
-						fmt.Printf("  %sURL: %s\n", urlPrefix, url)
-					}
-				}
-
-				if showLogs && status == "FAILURE" {
-					if logs, err := prItem.FetchCheckLogs(check); err == nil && logs != "" {
-						fmt.Printf("    │ Error logs:\n%s\n", logs)
-					} else if err != nil {
-						fmt.Printf("    │ (Could not fetch logs: %v)\n", err)
-					}
-				}
-			}
+		return totalGroups
+	},
+	"checkName": func(check github.StatusCheck) string {
+		if check.Name != "" {
+			return check.Name
 		}
-
-		// Handle any other statuses not in our predefined order
-		for status := range checksByStatus {
-			found := false
-			for _, knownStatus := range statusOrder {
-				if status == knownStatus {
-					found = true
-					break
-				}
-			}
-			if !found && len(checksByStatus[status]) > 0 {
-				groupIndex++
-				groupPrefix := "├─"
-				if groupIndex == totalGroups {
-					groupPrefix = "└─"
-				}
-
-				fmt.Printf("  %s%s (%d)\n", groupPrefix, status, len(checksByStatus[status]))
-
-				for i, check := range checksByStatus[status] {
-					itemPrefix := "│ ├─"
-					if groupIndex == totalGroups {
-						// This is the last group
-						if i == len(checksByStatus[status])-1 {
-							itemPrefix = "  └─"
-						} else {
-							itemPrefix = "  ├─"
-						}
-					} else if i == len(checksByStatus[status])-1 {
-						itemPrefix = "│ └─"
-					}
-
-					name := check.Name
-					if name == "" {
-						name = check.Context
-					}
-
-					url := check.DetailsUrl
-					if url == "" {
-						url = check.TargetUrl
-					}
-
-					supportsHyperlinks := !noHyperlinks && term.IsTerminal(int(os.Stdout.Fd())) && terminalSupportsHyperlinks()
-
-					if url != "" && supportsHyperlinks {
-						nameText := fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, name)
-						fmt.Printf("  %s%s\n", itemPrefix, nameText)
-					} else {
-						fmt.Printf("  %s%s\n", itemPrefix, name)
-						if url != "" {
-							urlPrefix := "│ │   └─"
-							if groupIndex == totalGroups {
-								if i == len(checksByStatus[status])-1 {
-									urlPrefix = "    └─"
-								} else {
-									urlPrefix = "  │   └─"
-								}
-							} else if i == len(checksByStatus[status])-1 {
-								urlPrefix = "│   └─"
-							}
-							fmt.Printf("  %sURL: %s\n", urlPrefix, url)
-						}
-					}
-
-					if showLogs && status == "FAILURE" {
-						if logs, err := prItem.FetchCheckLogs(check); err == nil && logs != "" {
-							fmt.Printf("    │ Error logs:\n%s\n", logs)
-						} else if err != nil {
-							fmt.Printf("    │ (Could not fetch logs: %v)\n", err)
-						}
-					}
-				}
-			}
+		return check.Context
+	},
+	"checkURL": func(check github.StatusCheck) string {
+		if check.DetailsUrl != "" {
+			return check.DetailsUrl
 		}
+		return check.TargetUrl
+	},
+	"supportsHyperlinks": func() bool {
+		return term.IsTerminal(int(os.Stdout.Fd())) && terminalSupportsHyperlinks()
+	},
+	"hyperlink": func(url, text string) string {
+		return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
+	},
+	"fetchLogs": func(pr github.PullRequest, check github.StatusCheck) string {
+		if logs, err := pr.FetchCheckLogs(check); err == nil && logs != "" {
+			return logs
+		}
+		return ""
+	},
+}
+
+func printVerbosePR(prItem github.PullRequest, showLogs bool, noHyperlinks bool) {
+	tmpl, err := template.New("verbose").Funcs(templateFuncs).Parse(verboseTemplate)
+	if err != nil {
+		log.Printf("Template parse error: %v", err)
+		return
 	}
 
+	data := TemplateData{
+		PullRequest:  prItem,
+		ShowLogs:     showLogs,
+		NoHyperlinks: noHyperlinks,
+		PR:           prItem,
+	}
+
+	if err := tmpl.Execute(os.Stdout, data); err != nil {
+		log.Printf("Template execution error: %v", err)
+		return
+	}
 }
 
 func contains(slice []string, item string) bool {
