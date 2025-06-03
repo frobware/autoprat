@@ -1,407 +1,216 @@
-# autoprat: Pull Request Automation Tool
+# autoprat
 
-Automate GitHub PR comment workflows from the command line.
+**Stop clicking through GitHub PRs one by one.**
 
-No more opening PRs in a browser to type `/lgtm`, `/approve`, `/ok-to-test`, or `/retest`. Let autoprat generate the commands for you.
+autoprat finds the PRs you care about and generates the commands to act on them in bulk.
 
----
+## The Problem
 
-## How it Works
+You maintain a busy repository. Every day you need to:
+- Approve PRs from trusted contributors like Dependabot
+- Give `/ok-to-test` to PRs that need it
+- Comment on failing PRs to restart CI
+- Find PRs missing reviews
 
-autoprat filters pull requests and generates `gh` CLI commands for common actions:
+Opening each PR in a browser tab gets old fast.
 
-1. **Filter** PRs based on criteria (author, labels, CI status)
-2. **Generate** `gh` commands for the actions you want
-3. **Output** commands for review and execution
-
-### What Commands Look Like
-
-autoprat generates standard `gh pr comment` commands. Here's what you actually get:
+## The Solution
 
 ```bash
-# Example: approve PRs that need approval
-$ autoprat -r owner/repo --needs-approve --approve --print
+# Find PRs that need approval.
+autoprat -r owner/repo --needs-approve
+
+# Generate approval commands for Dependabot PRs.
+autoprat -r owner/repo --author dependabot --approve --print
 gh pr comment 123 --repo owner/repo --body "/approve"
 gh pr comment 456 --repo owner/repo --body "/approve"
 
-# Example: custom comment with throttling
-$ autoprat -r owner/repo --failing-ci --comment "Investigating" --print
-gh pr comment 789 --repo owner/repo --body "Investigating"
-
-# Example: multiple actions on same PR
-$ autoprat -r owner/repo --needs-lgtm --needs-approve --lgtm --approve --print 123
-gh pr comment 123 --repo owner/repo --body "/lgtm"
-gh pr comment 123 --repo owner/repo --body "/approve"
+# Execute those commands.
+autoprat -r owner/repo --author dependabot --approve --print | sh
 ```
 
-**Review first, execute second**: Always run without `| sh` to see exactly what commands will be executed:
+autoprat queries GitHub once, applies your filters, and outputs standard `gh` commands you can review before running.
+
+## Quick Start
 
 ```bash
-# 1. Review commands
-autoprat -r owner/repo --needs-approve --approve --print
+# Install.
+go install github.com/frobware/autoprat@latest
 
-# 2. Execute if satisfied
-autoprat -r owner/repo --needs-approve --approve --print | sh
+# See what needs your attention.
+autoprat -r your-org/your-repo --needs-approve --needs-lgtm
+
+# Approve trusted bot PRs.
+autoprat -r your-org/your-repo --author dependabot --approve --print | sh
+
+# Handle PRs needing testing permission.
+autoprat -r your-org/your-repo --needs-ok-to-test --ok-to-test --print | sh
 ```
 
----
+## Common Workflows
+
+### Daily Maintenance
+```bash
+# What needs my attention today?
+autoprat -r myorg/myrepo --needs-approve --needs-lgtm
+
+# Bulk approve Dependabot PRs.
+autoprat -r myorg/myrepo --author dependabot --approve --print | sh
+
+# Give testing permission to community PRs.
+autoprat -r myorg/myrepo --needs-ok-to-test --ok-to-test --print | sh
+```
+
+### CI Firefighting
+```bash
+# Find failing PRs.
+autoprat -r myorg/myrepo --failing-ci
+
+# See detailed failure info with logs.
+autoprat -r myorg/myrepo --failing-ci --verbose
+
+# Comment on all failing PRs.
+autoprat -r myorg/myrepo --failing-ci --comment "Investigating CI failures" --print | sh
+
+# Override specific failing check across multiple PRs.
+autoprat -r myorg/myrepo --failing-check "ci/test-flaky" \
+  --comment "/override ci/test-flaky" --print | sh
+```
+
+### Advanced Filtering
+```bash
+# PRs from bot authors that need LGTM.
+autoprat -r myorg/myrepo --needs-lgtm --author-substring "bot"
+
+# High priority bugs without holds.
+autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "!do-not-merge/hold"
+
+# PRs missing approval from specific author.
+autoprat -r myorg/myrepo --author "trusted-contributor" --needs-approve
+```
+
+## How It Works
+
+1. **Single API call** fetches all open PRs with labels, CI status, and recent comments
+2. **Filter in memory** using your criteria (author, labels, CI status, etc.)
+3. **Generate standard gh commands** that you can review before executing
+4. **Execute selectively** by piping to shell or running commands individually
+
+autoprat never executes commands itself - it only generates `gh pr comment` commands for you to review and run.
+
+## Smart Features
+
+### Idempotent Actions
+Built-in actions are smart and safe to run repeatedly:
+```bash
+# Safe to run multiple times - only acts when needed.
+autoprat -r myorg/myrepo --approve --print | sh
+
+# Will only approve PRs that don't already have 'approved' label.
+# Will only /lgtm PRs that don't already have 'lgtm' label.
+# Will only /ok-to-test PRs that have 'needs-ok-to-test' label.
+```
+
+The built-in actions (`--approve`, `--lgtm`, `--ok-to-test`) check existing labels and only generate commands when appropriate. This makes them perfect for automation - no duplicate comments, no spam.
+
+### Comment Throttling
+Prevent spam when running in loops:
+```bash
+# Only post if same comment wasn't posted in last 30 minutes.
+autoprat -r myorg/myrepo --failing-ci \
+  --comment "Restarting CI" --throttle 30m --print | sh
+```
+
+### Intelligent Verbose Output
+View PR details with smart terminal detection:
+```bash
+# Basic PR status overview.
+autoprat -r myorg/myrepo --verbose
+
+# Automatic error log extraction from failing checks.
+autoprat -r myorg/myrepo --failing-ci -V
+
+# Force URLs for copy/paste (useful in terminals without hyperlink support).
+autoprat -r myorg/myrepo --verbose --no-hyperlinks
+```
+
+### Safety First
+Always review before executing:
+```bash
+# 1. See what would happen.
+autoprat -r myorg/myrepo --needs-approve --approve --print
+
+# 2. Execute if satisfied.
+autoprat -r myorg/myrepo --needs-approve --approve --print | sh
+```
+
+## All Options
+
+### Required
+- `-r, --repo OWNER/REPO` - GitHub repository
+
+### Filters (combine with AND logic)
+- `--author NAME` - Exact author match
+- `--author-substring TEXT` - Author contains text
+- `--label LABEL` - Has label (prefix `!` to negate)
+- `--failing-ci` - Has failing CI checks
+- `--failing-check NAME` - Specific CI check is failing (exact match)
+- `--needs-approve` - Missing 'approved' label
+- `--needs-lgtm` - Missing 'lgtm' label
+- `--needs-ok-to-test` - Has 'needs-ok-to-test' label
+
+### Actions (require `--print`)
+- `--approve` - Generate `/approve` commands
+- `--lgtm` - Generate `/lgtm` commands
+- `--ok-to-test` - Generate `/ok-to-test` commands
+- `--comment TEXT` - Generate custom comment commands
+- `--throttle DURATION` - Skip if same comment posted recently (e.g. `5m`, `1h`)
+
+### Output
+- `--print, -P` - Output `gh` commands instead of PR table
+- `--verbose, -v` - Detailed PR info with clickable logs
+- `--verbose-verbose, -V` - Detailed PR info with automatic error extraction
+- `--quiet, -q` - PR numbers only
+- `--no-hyperlinks` - Force explicit URLs
+
+### Debugging
+- `--debug` - Show throttling decisions and other debug info
 
 ## Installation
 
 ### Prerequisites
-
-- `gh` (GitHub CLI) - must be authenticated
-- Go 1.24+ (to build from source)
+- [GitHub CLI (`gh`)](https://cli.github.com/) installed and authenticated
+- Go 1.24+ (if building from source)
 
 ### Install
-
-Using `go install`:
-
 ```bash
+# Using go install (recommended).
 go install github.com/frobware/autoprat@latest
-```
 
-Or clone and build:
-
-```bash
+# Or build from source.
 git clone https://github.com/frobware/autoprat.git
 cd autoprat
 go build -o autoprat .
 ```
 
----
-
-## Core Concepts
-
-### Filters vs Actions
-
-autoprat separates filtering from actions:
-
-- **Filters** select PRs to work with
-- **Actions** define what commands to generate
-
-### Filter Options
-
-```
---author <exact>        Filter by author (exact match)
---author-substring <text> Filter by author (substring match)
---label <label>         Filter by label (prefix with ! to negate)
---failing-ci            Only PRs with failing CI
---failing-check <name>  Only PRs where specific CI check is failing (exact match)
---needs-approve         Only PRs missing 'approved' label
---needs-lgtm            Only PRs missing 'lgtm' label
---needs-ok-to-test      Only PRs with 'needs-ok-to-test' label
-```
-
-### Action Options
-
-All action flags require `-P/--print` to generate commands:
-
-```
---approve               Post /approve comment
---lgtm                  Post /lgtm comment
---ok-to-test            Post /ok-to-test comment
---comment <text>        Post custom comment
---throttle <duration>   Prevent duplicate comments within time window (e.g. 5m, 1h)
-```
-
-### Output Modes
-
-```
-(default)               Show PR table
---print, -P             Print gh commands instead of PR list
---verbose, -v           Show detailed PR information with clickable/copyable log URLs
--V                      Show detailed PR information with automatic error log extraction
---quiet, -q             Show PR numbers only
---no-hyperlinks         Force explicit URLs (useful for terminals without hyperlink support)
-```
-
----
-
-## Examples
-
-### Basic Workflow
-
-1. **Find PRs that need approval:**
-   ```bash
-   autoprat -r openshift/bpfman-operator --needs-approve
-   ```
-
-2. **Generate approval commands:**
-   ```bash
-   autoprat -r openshift/bpfman-operator --needs-approve --approve --print
-   ```
-
-3. **Execute commands:**
-   ```bash
-   autoprat -r openshift/bpfman-operator --needs-approve --approve --print | sh
-   ```
-
-### Filtering Examples
-
-```bash
-# PRs from specific author
-autoprat -r owner/repo --author "red-hat-konflux"
-
-# PRs from authors containing "bot"
-autoprat -r owner/repo --author-substring "bot"
-
-# PRs with specific label
-autoprat -r owner/repo --label "kind/bug"
-
-# PRs WITHOUT a label (negation)
-autoprat -r owner/repo --label "!do-not-merge"
-
-# Combine filters (AND logic)
-autoprat -r owner/repo --author "dependabot" --needs-lgtm --failing-ci
-
-# Multiple labels (must have all)
-autoprat -r owner/repo --label "kind/bug" --label "priority/high"
-
-# Multiple comments on matched PRs
-autoprat -r owner/repo --failing-ci \
-  --comment "CI is failing" \
-  --comment "Please check the logs" \
-  --print | sh
-
-# Filter by specific failing CI check
-autoprat -r owner/repo --failing-check "ci/prow/test-fmt"
-
-# Generate override commands for specific failing check
-autoprat -r owner/repo --failing-check "ci/prow/test-fmt" \
-  --comment "/override ci/prow/test-fmt" --print
-```
-
-### Action Examples
-
-```bash
-# Approve all PRs from dependabot
-autoprat -r owner/repo --author "dependabot" --approve --print | sh
-
-# LGTM and approve PRs missing both
-autoprat -r owner/repo --needs-lgtm --needs-approve --lgtm --approve --print | sh
-
-# Comment on failing PRs
-autoprat -r owner/repo --failing-ci --comment "Investigating CI failure" --print | sh
-
-# Give ok-to-test to PRs that need it
-autoprat -r owner/repo --needs-ok-to-test --ok-to-test --print | sh
-
-# Override specific failing CI check with throttling
-autoprat -r owner/repo --failing-check "ci/prow/test-fmt" \
-  --comment "/override ci/prow/test-fmt" \
-  --throttle 30m --print | sh
-```
-
-### Advanced Examples
-
-```bash
-# Dry run - see what commands would be generated
-autoprat -r owner/repo --needs-approve --approve --print
-
-# Multiple actions on filtered PRs
-autoprat -r owner/repo \
-  --author "red-hat-konflux" \
-  --needs-lgtm \
-  --needs-approve \
-  --lgtm \
-  --approve \
-  --comment "Automated approval" \
-  --print | sh
-
-# Get PR numbers for scripting
-autoprat -r owner/repo --failing-ci --quiet > failing-prs.txt
-
-# View specific PR details
-autoprat -r owner/repo --verbose 123
-```
-
-### Log Viewing Examples
-
-```bash
-# View PR status with log access (smart hyperlinks/URLs based on terminal)
-autoprat -r owner/repo --verbose
-
-# View PR status with automatic error extraction from failing checks
-autoprat -r owner/repo -V
-
-# Force explicit URLs (useful for Alacritty or copy/paste workflows)
-autoprat -r owner/repo --verbose --no-hyperlinks
-
-# Focus on failures with detailed error logs
-autoprat -r owner/repo --failing-ci -V
-
-# Check specific failing PR with error extraction
-autoprat -r owner/repo -V 123
-```
-
----
-
-## Command Reference
-
-```
-Usage:
-  autoprat [flags] [PR-NUMBER...]
-
-Required:
-  -r, --repo OWNER/REPO     GitHub repository
-
-Filters:
-  -a, --author EXACT        Filter by author (exact match)
-  -A, --author-substring TEXT Filter by author (substring)
-  -l, --label LABEL         Filter by label (! prefix to negate)
-  -f, --failing-ci          Only PRs with failing CI
-  --failing-check NAME      Only PRs where specific CI check is failing (exact match)
-  --needs-approve           Only PRs missing 'approved' label
-  --needs-lgtm              Only PRs missing 'lgtm' label
-  --needs-ok-to-test        Only PRs with 'needs-ok-to-test' label
-
-Actions:
-  --approve                 Generate /approve commands
-  --lgtm                    Generate /lgtm commands
-  --ok-to-test              Generate /ok-to-test commands
-  -c, --comment TEXT        Generate custom comment commands
-  --throttle DURATION       Prevent duplicate comments within time window
-
-Output:
-  -P, --print               Print gh commands (required for actions)
-  -v, --verbose             Show PR details with clickable/copyable log URLs
-  -V, --verbose-verbose     Show PR details with automatic error log extraction
-  -q, --quiet               Show PR numbers only
-  --debug                   Enable debug logging (shows throttling decisions)
-  --no-hyperlinks           Force explicit URLs (for terminals without hyperlink support)
-
-Positional:
-  [PR-NUMBER...]            Specific PR numbers to process
-```
-
----
-
-## Terminal Compatibility
-
-autoprat automatically detects your terminal's capabilities and provides the best log access experience:
-
-### Hyperlink Support
-- **iTerm2, GNOME Terminal, Windows Terminal, VS Code**: Clickable status text (SUCCESS/FAILURE become hyperlinks)
-- **Alacritty, older terminals**: Explicit URLs shown for copy/paste
-- **Override**: Use `--no-hyperlinks` to force explicit URLs
-
-### Automatic Detection
-autoprat checks environment variables (`TERM`, `TERM_PROGRAM`, etc.) to determine hyperlink support. No configuration needed.
-
----
-
-## Implementation
-
-autoprat uses GitHub's GraphQL API to fetch PR data, applies filters in-memory, and generates `gh pr comment` commands.
-
-Features:
-- Single API call for all PR data
-- Explicit filter and action separation
-- Standard Unix pipe compatibility
-- Command preview before execution
-- Smart terminal detection for optimal log access
-- Automatic error extraction from CI logs
-
----
-
-## Common Workflows
-
-### Daily PR Maintenance
-
-```bash
-# Check what needs attention
-autoprat -r myorg/myrepo --needs-approve
-
-# Approve PRs from trusted bots
-autoprat -r myorg/myrepo --author "dependabot" --approve --print | sh
-autoprat -r myorg/myrepo --author "renovate" --approve --print | sh
-
-# Handle PRs needing ok-to-test
-autoprat -r myorg/myrepo --needs-ok-to-test --ok-to-test --print | sh
-```
-
-### CI Failure Investigation
-
-```bash
-# List failing PRs
-autoprat -r myorg/myrepo --failing-ci
-
-# View failure details with log URLs
-autoprat -r myorg/myrepo --failing-ci --verbose
-
-# View failures with automatic error extraction
-autoprat -r myorg/myrepo --failing-ci -V
-
-# Comment on failing PRs
-autoprat -r myorg/myrepo --failing-ci \
-  --comment "CI is failing, investigating..." --print | sh
-
-# Target specific failing check
-autoprat -r myorg/myrepo --failing-check "ci/prow/test-fmt"
-
-# Override specific check with spam protection
-autoprat -r myorg/myrepo --failing-check "ci/prow/test-fmt" \
-  --comment "/override ci/prow/test-fmt" \
-  --throttle 1h --print | sh
-```
-
-### Bulk Operations
-
-```bash
-# Step 1: See what needs both LGTM and approval
-autoprat -r myorg/myrepo --needs-lgtm --needs-approve
-
-# Step 2: Filter by author if needed
-autoprat -r myorg/myrepo --needs-lgtm --needs-approve \
-  --author "trusted-contributor"
-
-# Step 3: Review commands
-autoprat -r myorg/myrepo --needs-lgtm --needs-approve \
-  --author "trusted-contributor" --lgtm --approve --print
-
-# Step 4: Execute
-autoprat -r myorg/myrepo --needs-lgtm --needs-approve \
-  --author "trusted-contributor" --lgtm --approve --print | sh
-```
-
-### Continuous Monitoring with Throttling
-
-For automated CI check overrides, use throttling to prevent comment spam:
-
-```bash
-# Terminal 1: Monitor failing checks (shows timing info)
-watch -n 30 "autoprat -r myorg/myrepo --failing-check 'ci/prow/test-fmt'"
-
-# Terminal 2: Execute override commands with throttling
-watch -n 60 "autoprat -r myorg/myrepo --failing-check 'ci/prow/test-fmt' \
-  --comment '/override ci/prow/test-fmt' --throttle 30m --print | sh"
-```
-
-The `--throttle` flag prevents duplicate comments within the specified time window. Combined with `watch`, this creates a robust automated workflow:
-
-- **Monitor**: Track PRs with specific failing checks
-- **Action**: Post override commands only when needed
-- **Protection**: Avoid spam with time-based deduplication
-
-The `LAST_COMMENTED` column shows when any comment was last posted, helping you understand the timing of recent activity.
-
----
-
 ## Tips
 
-1. **Review first**: Use `--print` without `| sh` to see commands
-2. **Multiple filters**: Filters combine with AND logic
-3. **Scripting**: Use `--quiet` to get PR numbers only
-4. **Test filters**: Run without actions to see matched PRs
-5. **Start small**: Test on individual PRs before bulk operations
-6. **Use exact check names**: `--failing-check` requires exact match for safety
-7. **Throttle wisely**: Start with longer periods (30m-1h) to avoid spam
-8. **Monitor timing**: Check `LAST_COMMENTED` column to understand recent activity
-9. **Debug throttling**: Use `--debug` with `--throttle` to see throttling decisions
+1. **Start with filters** - Run without `--print` to see which PRs match
+2. **Review before executing** - Always check generated commands first
+3. **Use throttling** - Prevent spam with `--throttle` in automated workflows
+4. **Combine filters** - Multiple filters use AND logic for precise targeting
+5. **Exact check names** - Use `--failing-check` with exact CI check names for safety
+6. **Script the common cases** - Save frequent filter combinations as shell aliases
 
----
+## Why autoprat?
 
-## Licence
+- **Fast**: Single API call, no per-PR requests
+- **Safe**: Review all commands before execution + idempotent built-in actions
+- **Smart**: Built-in actions check labels to avoid duplicate comments
+- **Flexible**: Powerful filtering with simple Unix pipes
+- **Transparent**: Standard `gh` commands, no magic
+- **Scriptable**: Perfect for automation and custom workflows
 
-MIT Licence.
+## License
+
+MIT
