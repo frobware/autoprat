@@ -14,9 +14,33 @@ autoprat filters pull requests and generates `gh` CLI commands for common action
 2. **Generate** `gh` commands for the actions you want
 3. **Output** commands for review and execution
 
-**Note**: autoprat only generates commands. To execute them, pipe to `sh`:
+### What Commands Look Like
+
+autoprat generates standard `gh pr comment` commands. Here's what you actually get:
 
 ```bash
+# Example: approve PRs that need approval
+$ autoprat -r owner/repo --needs-approve --approve --print
+gh pr comment 123 --repo owner/repo --body "/approve"
+gh pr comment 456 --repo owner/repo --body "/approve"
+
+# Example: custom comment with throttling
+$ autoprat -r owner/repo --failing-ci --comment "Investigating" --print
+gh pr comment 789 --repo owner/repo --body "Investigating"
+
+# Example: multiple actions on same PR
+$ autoprat -r owner/repo --needs-lgtm --needs-approve --lgtm --approve --print 123
+gh pr comment 123 --repo owner/repo --body "/lgtm"
+gh pr comment 123 --repo owner/repo --body "/approve"
+```
+
+**Review first, execute second**: Always run without `| sh` to see exactly what commands will be executed:
+
+```bash
+# 1. Review commands
+autoprat -r owner/repo --needs-approve --approve --print
+
+# 2. Execute if satisfied
 autoprat -r owner/repo --needs-approve --approve --print | sh
 ```
 
