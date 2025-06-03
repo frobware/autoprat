@@ -24,6 +24,11 @@ type graphQLPullRequest struct {
 	Labels            labels            `json:"labels"`
 	URL               string            `json:"url"`
 	StatusCheckRollup StatusCheckRollup `json:"statusCheckRollup"`
+	Comments          comments          `json:"comments"`
+}
+
+type comments struct {
+	Nodes []Comment `json:"nodes"`
 }
 
 type author struct {
@@ -89,6 +94,7 @@ func fetchPullRequests(repo string, debug bool) ([]PullRequest, error) {
 			AuthorLogin:       gqlPR.Author.Login,
 			URL:               gqlPR.URL,
 			StatusCheckRollup: gqlPR.StatusCheckRollup,
+			Comments:          gqlPR.Comments.Nodes,
 			repo:              repo,
 		}
 		prs = append(prs, pr)

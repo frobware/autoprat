@@ -3,6 +3,7 @@ package pr
 import (
 	"slices"
 	"strings"
+	"time"
 )
 
 type Client struct {
@@ -60,6 +61,10 @@ func matchesFilter(pr PullRequest, filter Filter) bool {
 		return false
 	}
 
+	if len(filter.FailingChecks) > 0 && !hasFailingChecks(pr, filter.FailingChecks) {
+		return false
+	}
+
 	return true
 }
 
@@ -67,6 +72,25 @@ func hasFailingCI(pr PullRequest) bool {
 	for _, check := range pr.StatusCheckRollup.Contexts.Nodes {
 		if check.State == "FAILURE" || check.Conclusion == "FAILURE" {
 			return true
+		}
+	}
+	return false
+}
+
+func hasFailingChecks(pr PullRequest, checkNames []string) bool {
+	for _, targetCheck := range checkNames {
+		for _, check := range pr.StatusCheckRollup.Contexts.Nodes {
+			checkName := check.Name
+			if checkName == "" {
+				checkName = check.Context
+			}
+
+			// Exact match only for safety
+			if checkName == targetCheck {
+				if check.State == "FAILURE" || check.Conclusion == "FAILURE" {
+					return true
+				}
+			}
 		}
 	}
 	return false
@@ -82,4 +106,28 @@ func sortPRsDescending(prs []PullRequest) {
 		}
 		return 0
 	})
+}
+
+// HasRecentComment checks if a comment was posted within the throttle period
+// using the comments already fetched with the PR data
+func HasRecentComment(pr PullRequest, commentText string, throttleWindow time.Duration) bool {
+	if throttleWindow <= 0 {
+		return false // No throttling means no deduplication
+	}
+
+	cutoff := time.Now().Add(-throttleWindow)
+
+	for _, comment := range pr.Comments {
+		if strings.TrimSpace(comment.Body) == strings.TrimSpace(commentText) {
+			createdAt, err := time.Parse(time.RFC3339, comment.CreatedAt)
+			if err != nil {
+				continue // Skip if we can't parse the timestamp
+			}
+			if createdAt.After(cutoff) {
+				return true // Found recent duplicate
+			}
+		}
+	}
+
+	return false
 }

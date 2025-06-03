@@ -63,6 +63,7 @@ autoprat separates filtering from actions:
 --author-substring <text> Filter by author (substring match)
 --label <label>         Filter by label (prefix with ! to negate)
 --failing-ci            Only PRs with failing CI
+--failing-check <name>  Only PRs where specific CI check is failing (exact match)
 --needs-approve         Only PRs missing 'approved' label
 --needs-lgtm            Only PRs missing 'lgtm' label
 --needs-ok-to-test      Only PRs with 'needs-ok-to-test' label
@@ -77,6 +78,7 @@ All action flags require `-P/--print` to generate commands:
 --lgtm                  Post /lgtm comment
 --ok-to-test            Post /ok-to-test comment
 --comment <text>        Post custom comment
+--throttle <duration>   Prevent duplicate comments within time window (e.g. 5m, 1h)
 ```
 
 ### Output Modes
@@ -137,6 +139,13 @@ autoprat -r owner/repo --failing-ci \
   --comment "CI is failing" \
   --comment "Please check the logs" \
   --print | sh
+
+# Filter by specific failing CI check
+autoprat -r owner/repo --failing-check "ci/prow/test-fmt"
+
+# Generate override commands for specific failing check
+autoprat -r owner/repo --failing-check "ci/prow/test-fmt" \
+  --comment "/override ci/prow/test-fmt" --print
 ```
 
 ### Action Examples
@@ -153,6 +162,11 @@ autoprat -r owner/repo --failing-ci --comment "Investigating CI failure" --print
 
 # Give ok-to-test to PRs that need it
 autoprat -r owner/repo --needs-ok-to-test --ok-to-test --print | sh
+
+# Override specific failing CI check with throttling
+autoprat -r owner/repo --failing-check "ci/prow/test-fmt" \
+  --comment "/override ci/prow/test-fmt" \
+  --throttle 30m --print | sh
 ```
 
 ### Advanced Examples
@@ -213,6 +227,7 @@ Filters:
   -A, --author-substring TEXT Filter by author (substring)
   -l, --label LABEL         Filter by label (! prefix to negate)
   -f, --failing-ci          Only PRs with failing CI
+  --failing-check NAME      Only PRs where specific CI check is failing (exact match)
   --needs-approve           Only PRs missing 'approved' label
   --needs-lgtm              Only PRs missing 'lgtm' label
   --needs-ok-to-test        Only PRs with 'needs-ok-to-test' label
@@ -222,12 +237,14 @@ Actions:
   --lgtm                    Generate /lgtm commands
   --ok-to-test              Generate /ok-to-test commands
   -c, --comment TEXT        Generate custom comment commands
+  --throttle DURATION       Prevent duplicate comments within time window
 
 Output:
   -P, --print               Print gh commands (required for actions)
   -v, --verbose             Show PR details with clickable/copyable log URLs
   -V, --verbose-verbose     Show PR details with automatic error log extraction
   -q, --quiet               Show PR numbers only
+  --debug                   Enable debug logging (shows throttling decisions)
   --no-hyperlinks           Force explicit URLs (for terminals without hyperlink support)
 
 Positional:
@@ -295,6 +312,14 @@ autoprat -r myorg/myrepo --failing-ci -V
 # Comment on failing PRs
 autoprat -r myorg/myrepo --failing-ci \
   --comment "CI is failing, investigating..." --print | sh
+
+# Target specific failing check
+autoprat -r myorg/myrepo --failing-check "ci/prow/test-fmt"
+
+# Override specific check with spam protection
+autoprat -r myorg/myrepo --failing-check "ci/prow/test-fmt" \
+  --comment "/override ci/prow/test-fmt" \
+  --throttle 1h --print | sh
 ```
 
 ### Bulk Operations
@@ -316,6 +341,27 @@ autoprat -r myorg/myrepo --needs-lgtm --needs-approve \
   --author "trusted-contributor" --lgtm --approve --print | sh
 ```
 
+### Continuous Monitoring with Throttling
+
+For automated CI check overrides, use throttling to prevent comment spam:
+
+```bash
+# Terminal 1: Monitor failing checks (shows timing info)
+watch -n 30 "autoprat -r myorg/myrepo --failing-check 'ci/prow/test-fmt'"
+
+# Terminal 2: Execute override commands with throttling
+watch -n 60 "autoprat -r myorg/myrepo --failing-check 'ci/prow/test-fmt' \
+  --comment '/override ci/prow/test-fmt' --throttle 30m --print | sh"
+```
+
+The `--throttle` flag prevents duplicate comments within the specified time window. Combined with `watch`, this creates a robust automated workflow:
+
+- **Monitor**: Track PRs with specific failing checks
+- **Action**: Post override commands only when needed
+- **Protection**: Avoid spam with time-based deduplication
+
+The `LAST_COMMENTED` column shows when any comment was last posted, helping you understand the timing of recent activity.
+
 ---
 
 ## Tips
@@ -325,9 +371,13 @@ autoprat -r myorg/myrepo --needs-lgtm --needs-approve \
 3. **Scripting**: Use `--quiet` to get PR numbers only
 4. **Test filters**: Run without actions to see matched PRs
 5. **Start small**: Test on individual PRs before bulk operations
+6. **Use exact check names**: `--failing-check` requires exact match for safety
+7. **Throttle wisely**: Start with longer periods (30m-1h) to avoid spam
+8. **Monitor timing**: Check `LAST_COMMENTED` column to understand recent activity
+9. **Debug throttling**: Use `--debug` with `--throttle` to see throttling decisions
 
 ---
 
-## License
+## Licence
 
-MIT License.
+MIT Licence.

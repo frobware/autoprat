@@ -69,7 +69,7 @@ query($owner: String!, $repo: String!) {
             }
           }
         }
-        comments(last: 5) {
+        comments(last: 15) {
           nodes {
             author {
               login

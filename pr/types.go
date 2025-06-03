@@ -12,6 +12,7 @@ type PullRequest struct {
 	URL               string
 	State             string
 	StatusCheckRollup StatusCheckRollup
+	Comments          []Comment
 	repo              string
 }
 
@@ -30,6 +31,14 @@ type StatusCheck struct {
 	TargetUrl  string `json:"targetUrl,omitempty"`
 }
 
+type Comment struct {
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+	Author    struct {
+		Login string `json:"login"`
+	} `json:"author"`
+}
+
 type LabelFilter struct {
 	Name   string
 	Negate bool
@@ -41,4 +50,5 @@ type Filter struct {
 	AuthorSubstring string
 	Labels          []LabelFilter
 	OnlyFailingCI   bool
+	FailingChecks   []string
 }

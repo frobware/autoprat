@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/frobware/autoprat/pr"
 	"github.com/frobware/autoprat/pr/actions"
@@ -38,8 +39,10 @@ var (
 	author          = pflag.StringP("author", "a", "", "Filter by author (exact match)")
 	authorSubstring = pflag.StringP("author-substring", "A", "", "Filter by author containing text")
 	comment         = pflag.StringSliceP("comment", "c", nil, "Generate comment commands")
+	throttle        = pflag.Duration("throttle", 0, "Throttle identical comments to limit posting frequency (e.g. 5m, 1h)")
 	debug           = pflag.Bool("debug", false, "Enable debug logging")
 	failingCI       = pflag.BoolP("failing-ci", "f", false, "Only show PRs with failing CI")
+	failingCheck    = pflag.StringSlice("failing-check", nil, "Only show PRs where specific CI check is failing (exact match, e.g. 'ci/prow/test-fmt')")
 	label           = pflag.StringSliceP("label", "l", nil, "Filter by label (prefix with ! to negate)")
 	lgtm            = pflag.Bool("lgtm", false, "Generate /lgtm commands for PRs without 'lgtm' label")
 	okToTest        = pflag.Bool("ok-to-test", false, "Generate /ok-to-test commands for PRs with needs-ok-to-test label")
@@ -107,6 +110,7 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 		Author:          *author,
 		AuthorSubstring: *authorSubstring,
 		OnlyFailingCI:   *failingCI,
+		FailingChecks:   *failingCheck,
 	}
 
 	// Warn if --ok-to-test is used without --needs-ok-to-test and
@@ -193,10 +197,17 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 	}
 
 	if *printGHCommand {
-		for _, pr := range prs {
-			toPost := actions.FilterActions(allActions, pr.Labels)
+		for _, prItem := range prs {
+			toPost := actions.FilterActions(allActions, prItem.Labels)
 			for _, a := range toPost {
-				fmt.Println(a.Command(*repo, pr.Number))
+				// Check throttling if specified
+				if *throttle > 0 && pr.HasRecentComment(prItem, a.Comment, *throttle) {
+					if *debug {
+						fmt.Fprintf(os.Stderr, "Skipping comment for PR #%d: recent duplicate found (throttle: %v)\n", prItem.Number, *throttle)
+					}
+					continue
+				}
+				fmt.Println(a.Command(*repo, prItem.Number))
 			}
 		}
 		return
@@ -205,6 +216,9 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 	if *verbose || *verboseVerbose {
 		for _, pr := range prs {
 			printVerbosePR(pr, *verboseVerbose, *noHyperlinks)
+			if *throttle > 0 {
+				printThrottleDiagnostics(pr, allActions)
+			}
 			fmt.Println()
 		}
 		return
@@ -218,7 +232,10 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PR URL\tCI\tAPPROVED\tLGTM\tOK2TEST\tHOLD\tAUTHOR\tTITLE")
+
+	headerRow := "PR URL\tCI\tAPPROVED\tLGTM\tOK2TEST\tHOLD\tAUTHOR\tLAST_COMMENTED\tTITLE"
+	fmt.Fprintln(tw, headerRow)
+
 	for _, pr := range prs {
 		approved := contains(pr.Labels, "approved")
 		lgtm := contains(pr.Labels, "lgtm")
@@ -227,7 +244,8 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 
 		ciStatus := summarizeCIStatus(pr.StatusCheckRollup.Contexts.Nodes)
 
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		lastCommented := getLastCommentTime(pr)
+		row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
 			pr.URL,
 			ciStatus,
 			yesNo(approved),
@@ -235,8 +253,11 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 			yesNo(!okToTest), // ok-to-test = Y if no 'needs-ok-to-test' label
 			yesNo(hold),
 			pr.AuthorLogin,
+			lastCommented,
 			pr.Title,
 		)
+
+		fmt.Fprintln(tw, row)
 	}
 	tw.Flush()
 }
@@ -420,4 +441,93 @@ func terminalSupportsHyperlinks() bool {
 	}
 
 	return false
+}
+
+// printThrottleDiagnostics shows what the throttling logic would do for debugging
+func printThrottleDiagnostics(prItem pr.PullRequest, allActions []actions.Action) {
+	toPost := actions.FilterActions(allActions, prItem.Labels)
+	if len(toPost) == 0 {
+		return
+	}
+
+	fmt.Printf("├─Throttle Analysis (period: %v)\n", *throttle)
+
+	if len(prItem.Comments) == 0 {
+		fmt.Printf("│ └─No recent comments found\n")
+		for _, a := range toPost {
+			fmt.Printf("│   └─Would post: %s ✓\n", a.Comment)
+		}
+		return
+	}
+
+	fmt.Printf("│ ├─Recent comments (%d found):\n", len(prItem.Comments))
+
+	for i, comment := range prItem.Comments {
+		createdAt, err := time.Parse(time.RFC3339, comment.CreatedAt)
+		age := ""
+		if err == nil {
+			age = time.Since(createdAt).Round(time.Minute).String()
+		}
+
+		prefix := "│ │ ├─"
+		if i == len(prItem.Comments)-1 {
+			prefix = "│ │ └─"
+		}
+
+		fmt.Printf("%s%s (%s ago): %q\n", prefix, comment.Author.Login, age,
+			strings.ReplaceAll(strings.TrimSpace(comment.Body), "\n", " "))
+	}
+
+	fmt.Printf("│ └─Action Analysis:\n")
+	for i, a := range toPost {
+		hasRecent := pr.HasRecentComment(prItem, a.Comment, *throttle)
+		status := "✓ Would post"
+		if hasRecent {
+			status = "✗ Throttled (recent duplicate)"
+		}
+
+		prefix := "│   ├─"
+		if i == len(toPost)-1 {
+			prefix = "│   └─"
+		}
+
+		fmt.Printf("%s%s: %s\n", prefix, status, a.Comment)
+	}
+}
+
+// getLastCommentTime returns when any comment was last posted on the PR
+func getLastCommentTime(prItem pr.PullRequest) string {
+	if len(prItem.Comments) == 0 {
+		return "never"
+	}
+
+	// Find the most recent comment (any comment)
+	var mostRecent time.Time
+	found := false
+
+	for _, comment := range prItem.Comments {
+		createdAt, err := time.Parse(time.RFC3339, comment.CreatedAt)
+		if err != nil {
+			continue
+		}
+		if !found || createdAt.After(mostRecent) {
+			mostRecent = createdAt
+			found = true
+		}
+	}
+
+	if !found {
+		return "never"
+	}
+
+	timeSince := time.Since(mostRecent)
+	if timeSince < time.Minute {
+		return fmt.Sprintf("%ds", int(timeSince.Seconds()))
+	} else if timeSince < time.Hour {
+		return fmt.Sprintf("%dm", int(timeSince.Minutes()))
+	} else if timeSince < 24*time.Hour {
+		return fmt.Sprintf("%dh%dm", int(timeSince.Hours()), int(timeSince.Minutes())%60)
+	} else {
+		return fmt.Sprintf("%dd", int(timeSince.Hours()/24))
+	}
 }
