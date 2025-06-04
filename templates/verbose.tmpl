@@ -42,9 +42,6 @@
           {{- else if eq $i (sub (len $checks) 1)}}{{$itemPrefix = "│ └─"}}{{end}}
           {{- $name := checkName $check}}
           {{- $url := checkURL $check}}
-          {{- if and $url (not $.NoHyperlinks) (supportsHyperlinks)}}
-  {{$itemPrefix}}{{hyperlink $url $name}}
-          {{- else}}
   {{$itemPrefix}}{{$name}}
             {{- if $url}}
               {{- $urlPrefix := "│ │ └─"}}
@@ -53,7 +50,6 @@
               {{- else if eq $i (sub (len $checks) 1)}}{{$urlPrefix = "│   └─"}}{{end}}
   {{$urlPrefix}}URL: {{$url}}
             {{- end}}
-          {{- end}}
           {{- if and $.ShowLogs (eq $status "FAILURE")}}
             {{- $logs := fetchLogs $.PR $check}}
             {{- if $logs}}
@@ -79,9 +75,6 @@
           {{- else if eq $i (sub (len $checks) 1)}}{{$itemPrefix = "│ └─"}}{{end}}
           {{- $name := checkName $check}}
           {{- $url := checkURL $check}}
-          {{- if and $url (not $.NoHyperlinks) (supportsHyperlinks)}}
-  {{$itemPrefix}}{{hyperlink $url $name}}
-          {{- else}}
   {{$itemPrefix}}{{$name}}
             {{- if $url}}
               {{- $urlPrefix := "│ │ └─"}}
@@ -90,7 +83,6 @@
               {{- else if eq $i (sub (len $checks) 1)}}{{$urlPrefix = "│   └─"}}{{end}}
   {{$urlPrefix}}URL: {{$url}}
             {{- end}}
-          {{- end}}
           {{- if and $.ShowLogs (eq $status "FAILURE")}}
             {{- $logs := fetchLogs $.PR $check}}
             {{- if $logs}}

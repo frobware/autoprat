@@ -127,7 +127,7 @@ autoprat -r myorg/myrepo --failing-ci \
 ### Intelligent Verbose Output
 Two levels of verbosity for different needs:
 
-**Basic verbose (`-v`)** - Detailed PR tree view with clickable/copyable URLs:
+**Basic verbose (`-v`)** - Detailed PR tree view with URLs:
 ```bash
 # See PR status, labels, and CI check results.
 autoprat -r myorg/myrepo --verbose
@@ -145,11 +145,6 @@ autoprat -r myorg/myrepo --failing-ci -V
 autoprat -r myorg/myrepo -V
 ```
 
-**Terminal compatibility:**
-```bash
-# Force URLs for copy/paste (useful in terminals without hyperlink support).
-autoprat -r myorg/myrepo --verbose --no-hyperlinks
-```
 
 ### Safety First
 Always review before executing:
@@ -188,10 +183,9 @@ autoprat -r myorg/myrepo --needs-approve --approve --print | sh
 
 ### Output
 - `--print, -P` - Output `gh` commands instead of PR table
-- `--verbose, -v` - Detailed PR tree view with CI status and clickable logs
+- `--verbose, -v` - Detailed PR tree view with CI status and URLs
 - `--verbose-verbose, -V` - Same as `-v` plus automatic error log extraction from failures
 - `--quiet, -q` - PR numbers only
-- `--no-hyperlinks` - Force explicit URLs instead of terminal hyperlinks
 
 ### Debugging
 - `--debug` - Show throttling decisions and other debug info

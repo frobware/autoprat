@@ -30,7 +30,6 @@ import (
 	"github.com/frobware/autoprat/github"
 	"github.com/frobware/autoprat/github/actions"
 	"github.com/spf13/pflag"
-	"golang.org/x/term"
 )
 
 //go:embed templates/verbose.tmpl
@@ -54,7 +53,6 @@ var (
 	quiet           = pflag.BoolP("quiet", "q", false, "Print PR numbers only")
 	verbose         = pflag.BoolP("verbose", "v", false, "Print PR status only")
 	verboseVerbose  = pflag.BoolP("verbose-verbose", "V", false, "Print PR status with error logs from failing checks")
-	noHyperlinks    = pflag.Bool("no-hyperlinks", false, "Disable terminal hyperlinks, show URLs explicitly")
 	needsApprove    = pflag.Bool("needs-approve", false, "Include only PRs missing the 'approved' label")
 	needsLgtm       = pflag.Bool("needs-lgtm", false, "Include only PRs missing the 'lgtm' label")
 	needsOkToTest   = pflag.Bool("needs-ok-to-test", false, "Include only PRs that have the 'needs-ok-to-test' label")
@@ -220,7 +218,7 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 
 	if *verbose || *verboseVerbose {
 		for _, pr := range prs {
-			printVerbosePR(pr, *verboseVerbose, *noHyperlinks)
+			printVerbosePR(pr, *verboseVerbose)
 			if *throttle > 0 {
 				printThrottleDiagnostics(pr, allActions)
 			}
@@ -270,9 +268,8 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 // Template data structure for verbose PR output
 type TemplateData struct {
 	github.PullRequest
-	ShowLogs     bool
-	NoHyperlinks bool
-	PR           github.PullRequest // For nested access in templates
+	ShowLogs bool
+	PR       github.PullRequest // For nested access in templates
 }
 
 // Template helper functions
@@ -349,12 +346,6 @@ var templateFuncs = template.FuncMap{
 		}
 		return check.TargetUrl
 	},
-	"supportsHyperlinks": func() bool {
-		return term.IsTerminal(int(os.Stdout.Fd())) && terminalSupportsHyperlinks()
-	},
-	"hyperlink": func(url, text string) string {
-		return fmt.Sprintf("\033]8;;%s\033\\%s\033]8;;\033\\", url, text)
-	},
 	"fetchLogs": func(pr github.PullRequest, check github.StatusCheck) string {
 		if logs, err := pr.FetchCheckLogs(check); err == nil && logs != "" {
 			return logs
@@ -363,7 +354,7 @@ var templateFuncs = template.FuncMap{
 	},
 }
 
-func printVerbosePR(prItem github.PullRequest, showLogs bool, noHyperlinks bool) {
+func printVerbosePR(prItem github.PullRequest, showLogs bool) {
 	tmpl, err := template.New("verbose").Funcs(templateFuncs).Parse(verboseTemplate)
 	if err != nil {
 		log.Printf("Template parse error: %v", err)
@@ -371,10 +362,9 @@ func printVerbosePR(prItem github.PullRequest, showLogs bool, noHyperlinks bool)
 	}
 
 	data := TemplateData{
-		PullRequest:  prItem,
-		ShowLogs:     showLogs,
-		NoHyperlinks: noHyperlinks,
-		PR:           prItem,
+		PullRequest: prItem,
+		ShowLogs:    showLogs,
+		PR:          prItem,
 	}
 
 	if err := tmpl.Execute(os.Stdout, data); err != nil {
@@ -434,56 +424,6 @@ func filterByLabelPresence(prs []github.PullRequest, label string) []github.Pull
 		}
 	}
 	return filtered
-}
-
-// terminalSupportsHyperlinks detects if the terminal supports OSC 8 hyperlinks
-func terminalSupportsHyperlinks() bool {
-	term := os.Getenv("TERM")
-	termProgram := os.Getenv("TERM_PROGRAM")
-	terminalEmulator := os.Getenv("TERMINAL_EMULATOR")
-
-	supportedTerms := map[string]bool{
-		"xterm-kitty": true,
-		"foot":        true,
-		"foot-extra":  true,
-	}
-
-	supportedPrograms := map[string]bool{
-		"iTerm.app": true,
-		"vscode":    true,
-		"WezTerm":   true,
-	}
-
-	if supportedTerms[term] {
-		return true
-	}
-
-	if supportedPrograms[termProgram] {
-		return true
-	}
-
-	if terminalEmulator == "JetBrains-JediTerm" {
-		return true
-	}
-
-	if os.Getenv("VTE_VERSION") != "" {
-		return true
-	}
-
-	if os.Getenv("WT_SESSION") != "" {
-		return true
-	}
-
-	if strings.Contains(term, "gnome") ||
-		strings.Contains(term, "xterm-256color") && termProgram == "gnome-terminal-server" {
-		return true
-	}
-
-	if termProgram == "Alacritty" || term == "alacritty" {
-		return false
-	}
-
-	return false
 }
 
 // printThrottleDiagnostics shows what the throttling logic would do for debugging
