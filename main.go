@@ -37,6 +37,7 @@ import (
 
 	"github.com/frobware/autoprat/github"
 	"github.com/frobware/autoprat/github/actions"
+	"github.com/frobware/autoprat/github/filters"
 	"github.com/spf13/pflag"
 )
 
@@ -56,18 +57,15 @@ type PRArgument struct {
 //   - "123" (numeric PR number)
 //   - "https://github.com/owner/repo/pull/123" (GitHub PR URL)
 func parsePRArgument(arg string) (PRArgument, error) {
-	// Try parsing as a number first.
 	if num, err := strconv.Atoi(arg); err == nil {
 		return PRArgument{Number: num}, nil
 	}
 
-	// Try parsing as a GitHub URL.
 	parsedURL, err := url.Parse(arg)
 	if err != nil {
 		return PRArgument{}, fmt.Errorf("invalid PR number or URL %q", arg)
 	}
 
-	// Match GitHub PR URL pattern: /owner/repo/pull/number.
 	re := regexp.MustCompile(`^/([^/]+)/([^/]+)/pull/(\d+)/?$`)
 	matches := re.FindStringSubmatch(parsedURL.Path)
 	if len(matches) != 4 {
@@ -90,12 +88,10 @@ func getBuildInfo() (string, string, string) {
 	goVer := runtime.Version()
 
 	if info, ok := debug.ReadBuildInfo(); ok {
-		// Use module version if available.
 		if info.Main.Version != "(devel)" && info.Main.Version != "" {
 			buildVersion = info.Main.Version
 		}
 
-		// Look for VCS information.
 		for _, setting := range info.Settings {
 			switch setting.Key {
 			case "vcs.time":
@@ -119,11 +115,12 @@ type Config struct {
 	ParsedPRs    []PRArgument
 	Filter       github.Filter
 	Actions      []actions.Action
+	Filters      []filters.FilterDefinition
 }
 
 // parseAndValidateArgs parses command line arguments and validates
 // repository requirements.
-func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[string]*bool) (*Config, error) {
+func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[string]*bool, filterRegistry *filters.Registry, filterFlags map[string]*bool) (*Config, error) {
 	prNumbers := pflag.Args()
 
 	var parsedPRs []PRArgument
@@ -172,14 +169,6 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 		})
 	}
 
-	filter := github.Filter{
-		Labels:          labels,
-		Author:          *author,
-		AuthorSubstring: *authorSubstring,
-		OnlyFailingCI:   *failingCI,
-		FailingChecks:   *failingCheck,
-	}
-
 	var allActions []actions.Action
 	for _, c := range *comment {
 		allActions = append(allActions, actions.Action{
@@ -197,11 +186,29 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 		}
 	}
 
+	var allFilters []filters.FilterDefinition
+	for flag, flagPtr := range filterFlags {
+		if *flagPtr {
+			filterDef, exists := filterRegistry.GetFilter(flag)
+			if exists {
+				allFilters = append(allFilters, filterDef)
+			}
+		}
+	}
+
+	filter := github.Filter{
+		Labels:          labels,
+		Author:          *author,
+		AuthorSubstring: *authorSubstring,
+		FailingChecks:   *failingCheck,
+	}
+
 	return &Config{
 		Repositories: repoList,
 		ParsedPRs:    parsedPRs,
 		Filter:       filter,
 		Actions:      allActions,
+		Filters:      allFilters,
 	}, nil
 }
 
@@ -253,7 +260,7 @@ func fetchAllRepositoryPRs(repositories []string, filter github.Filter) ([]Repos
 }
 
 // printGroupedFlags prints command line flags organized into logical groups.
-func printGroupedFlags(actionRegistry *actions.Registry) {
+func printGroupedFlags(actionRegistry *actions.Registry, filterRegistry *filters.Registry) {
 	fmt.Fprintf(os.Stderr, "Repository:\n")
 	fmt.Fprintf(os.Stderr, "  -r, --repo string               GitHub repo (owner/repo)\n\n")
 
@@ -261,11 +268,36 @@ func printGroupedFlags(actionRegistry *actions.Registry) {
 	fmt.Fprintf(os.Stderr, "  -a, --author string             Filter by author (exact match)\n")
 	fmt.Fprintf(os.Stderr, "  -A, --author-substring string   Filter by author containing text\n")
 	fmt.Fprintf(os.Stderr, "  -l, --label strings             Filter by label (prefix with ! to negate)\n")
-	fmt.Fprintf(os.Stderr, "  -f, --failing-ci                Only show PRs with failing CI\n")
 	fmt.Fprintf(os.Stderr, "      --failing-check strings     Only show PRs where specific CI check is failing (exact match)\n")
-	fmt.Fprintf(os.Stderr, "      --needs-approve             Include only PRs missing the 'approved' label\n")
-	fmt.Fprintf(os.Stderr, "      --needs-lgtm                Include only PRs missing the 'lgtm' label\n")
-	fmt.Fprintf(os.Stderr, "      --needs-ok-to-test          Include only PRs that have the 'needs-ok-to-test' label\n\n")
+
+	// Show built-in filters
+	builtinFilterFlags := filterRegistry.GetFlagsBySource("embedded")
+	for _, flag := range builtinFilterFlags {
+		filter, _ := filterRegistry.GetFilter(flag)
+		flagDisplay := fmt.Sprintf("--%s", flag)
+		if filter.FlagShort != "" {
+			flagDisplay = fmt.Sprintf("-%s, --%s", filter.FlagShort, flag)
+		}
+		fmt.Fprintf(os.Stderr, "  %-31s %s\n", flagDisplay, filter.Description)
+	}
+
+	// Show user-defined filters if any exist
+	userFilterFlags := filterRegistry.GetFlagsBySource("user")
+	if len(userFilterFlags) > 0 {
+		homeDir, _ := os.UserHomeDir()
+		filtersPath := filepath.Join(homeDir, ".config", "autoprat", "filters")
+		fmt.Fprintf(os.Stderr, "\n  User-defined filters (from %s):\n", filtersPath)
+		for _, flag := range userFilterFlags {
+			filter, _ := filterRegistry.GetFilter(flag)
+			flagDisplay := fmt.Sprintf("--%s", flag)
+			if filter.FlagShort != "" {
+				flagDisplay = fmt.Sprintf("-%s, --%s", filter.FlagShort, flag)
+			}
+			fmt.Fprintf(os.Stderr, "  %-31s %s\n", flagDisplay, filter.Description)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "\n")
 
 	fmt.Fprintf(os.Stderr, "Actions:\n")
 	builtinFlags := actionRegistry.GetFlagsBySource("embedded")
@@ -303,14 +335,8 @@ func applyFilters(allRepositoryPRs []RepositoryPRs, config *Config) []Repository
 	for i := range allRepositoryPRs {
 		prs := allRepositoryPRs[i].PRs
 
-		if *needsApprove {
-			prs = filterByLabelAbsence(prs, "approved")
-		}
-		if *needsLgtm {
-			prs = filterByLabelAbsence(prs, "lgtm")
-		}
-		if *needsOkToTest {
-			prs = filterByLabelPresence(prs, "needs-ok-to-test")
+		for _, filter := range config.Filters {
+			prs = filter.Apply(prs)
 		}
 
 		if len(config.ParsedPRs) > 0 {
@@ -424,15 +450,11 @@ var (
 	comment         = pflag.StringSliceP("comment", "c", nil, "Generate comment commands")
 	throttle        = pflag.Duration("throttle", 0, "Throttle identical comments to limit posting frequency (e.g. 5m, 1h)")
 	debugMode       = pflag.Bool("debug", false, "Enable debug logging")
-	failingCI       = pflag.BoolP("failing-ci", "f", false, "Only show PRs with failing CI")
 	failingCheck    = pflag.StringSlice("failing-check", nil, "Only show PRs where specific CI check is failing (exact match, e.g. 'ci/prow/test-fmt')")
 	label           = pflag.StringSliceP("label", "l", nil, "Filter by label (prefix with ! to negate)")
 	quiet           = pflag.BoolP("quiet", "q", false, "Print PR numbers only")
 	verbose         = pflag.BoolP("verbose", "v", false, "Print PR status only")
 	verboseVerbose  = pflag.BoolP("verbose-verbose", "V", false, "Print PR status with error logs from failing checks")
-	needsApprove    = pflag.Bool("needs-approve", false, "Include only PRs missing the 'approved' label")
-	needsLgtm       = pflag.Bool("needs-lgtm", false, "Include only PRs missing the 'lgtm' label")
-	needsOkToTest   = pflag.Bool("needs-ok-to-test", false, "Include only PRs that have the 'needs-ok-to-test' label")
 	showVersion     = pflag.Bool("version", false, "Show version information")
 )
 
@@ -442,9 +464,23 @@ func main() {
 		log.Fatalf("Failed to load action registry: %v", err)
 	}
 
+	filterRegistry, err := filters.NewRegistry()
+	if err != nil {
+		log.Fatalf("Failed to load filter registry: %v", err)
+	}
+
 	actionFlags := make(map[string]*bool)
 	for flag, action := range actionRegistry.GetAllActions() {
 		actionFlags[flag] = pflag.Bool(flag, false, action.Description)
+	}
+
+	filterFlags := make(map[string]*bool)
+	for flag, filter := range filterRegistry.GetAllFilters() {
+		if filter.FlagShort != "" {
+			filterFlags[flag] = pflag.BoolP(flag, filter.FlagShort, false, filter.Description)
+		} else {
+			filterFlags[flag] = pflag.Bool(flag, false, filter.Description)
+		}
 	}
 
 	pflag.Usage = func() {
@@ -464,7 +500,7 @@ automatically and --repo is not required.
 
 `)
 
-		printGroupedFlags(actionRegistry)
+		printGroupedFlags(actionRegistry, filterRegistry)
 
 		fmt.Fprintf(os.Stderr, `
 Examples:
@@ -497,7 +533,7 @@ Examples:
 		os.Exit(0)
 	}
 
-	config, err := parseAndValidateArgs(actionRegistry, actionFlags)
+	config, err := parseAndValidateArgs(actionRegistry, actionFlags, filterRegistry, filterFlags)
 	if err != nil {
 		pflag.Usage()
 		fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
@@ -662,26 +698,6 @@ func summarizeCIStatus(checks []github.StatusCheck) string {
 		}
 	}
 	return "Passing"
-}
-
-func filterByLabelAbsence(prs []github.PullRequest, label string) []github.PullRequest {
-	filtered := prs[:0]
-	for _, pr := range prs {
-		if !contains(pr.Labels, label) {
-			filtered = append(filtered, pr)
-		}
-	}
-	return filtered
-}
-
-func filterByLabelPresence(prs []github.PullRequest, label string) []github.PullRequest {
-	filtered := prs[:0]
-	for _, pr := range prs {
-		if contains(pr.Labels, label) {
-			filtered = append(filtered, pr)
-		}
-	}
-	return filtered
 }
 
 // printThrottleDiagnostics shows what the throttling logic would do

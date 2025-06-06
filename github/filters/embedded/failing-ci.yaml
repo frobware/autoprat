@@ -1,0 +1,5 @@
+name: failing-ci
+flag: failing-ci
+flag_short: "f"
+description: "Only show PRs with failing CI"
+filter_type: "failing_ci"

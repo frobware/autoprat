@@ -57,10 +57,6 @@ func matchesFilter(pr PullRequest, filter Filter) bool {
 		}
 	}
 
-	if filter.OnlyFailingCI && !hasFailingCI(pr) {
-		return false
-	}
-
 	if len(filter.FailingChecks) > 0 && !hasFailingChecks(pr, filter.FailingChecks) {
 		return false
 	}
@@ -85,7 +81,7 @@ func hasFailingChecks(pr PullRequest, checkNames []string) bool {
 				checkName = check.Context
 			}
 
-			// Exact match only for safety
+			// Exact match only for safety.
 			if checkName == targetCheck {
 				if check.State == "FAILURE" || check.Conclusion == "FAILURE" {
 					return true
@@ -112,7 +108,7 @@ func sortPRsDescending(prs []PullRequest) {
 // using the comments already fetched with the PR data
 func HasRecentComment(pr PullRequest, commentText string, throttleWindow time.Duration) bool {
 	if throttleWindow <= 0 {
-		return false // No throttling means no deduplication
+		return false // No throttling means no deduplication.
 	}
 
 	cutoff := time.Now().Add(-throttleWindow)
@@ -121,10 +117,10 @@ func HasRecentComment(pr PullRequest, commentText string, throttleWindow time.Du
 		if strings.TrimSpace(comment.Body) == strings.TrimSpace(commentText) {
 			createdAt, err := time.Parse(time.RFC3339, comment.CreatedAt)
 			if err != nil {
-				continue // Skip if we can't parse the timestamp
+				continue // Skip if we can't parse the timestamp.
 			}
 			if createdAt.After(cutoff) {
-				return true // Found recent duplicate
+				return true // Found recent duplicate.
 			}
 		}
 	}

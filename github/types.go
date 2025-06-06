@@ -49,6 +49,5 @@ type Filter struct {
 	Author          string
 	AuthorSubstring string
 	Labels          []LabelFilter
-	OnlyFailingCI   bool
 	FailingChecks   []string
 }

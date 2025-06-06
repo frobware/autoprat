@@ -10,11 +10,7 @@ type LabelPredicate int
 
 const (
 	PredicateNone LabelPredicate = iota
-
-	// skip posting if label present.
 	PredicateSkipIfLabelExists
-
-	// post only if label present.
 	PredicateOnlyIfLabelExists
 )
 
@@ -42,12 +38,10 @@ func FilterActions(actions []Action, prLabels []string) []Action {
 		switch a.Predicate {
 		case PredicateSkipIfLabelExists:
 			if hasLabel {
-				// skip action because label exists.
 				continue
 			}
 		case PredicateOnlyIfLabelExists:
 			if !hasLabel {
-				// skip because required label missing.
 				continue
 			}
 		}

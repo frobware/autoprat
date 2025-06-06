@@ -1,0 +1,5 @@
+name: needs-lgtm
+flag: needs-lgtm
+description: "Include only PRs missing the 'lgtm' label"
+filter_type: "label_absence"
+label: "lgtm"
