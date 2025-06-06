@@ -38,10 +38,10 @@ import (
 //go:embed templates/verbose.tmpl
 var verboseTemplate string
 
-// PRArgument represents a parsed PR argument with number and optional repository
+// PRArgument represents a parsed PR argument with number and optional repository.
 type PRArgument struct {
 	Number int
-	Repo   string // Empty for numeric arguments, populated for URLs
+	Repo   string // Empty for numeric arguments, populated for URLs.
 }
 
 // parsePRArgument extracts a PR number and repository from either a numeric string or GitHub URL.
@@ -51,18 +51,18 @@ type PRArgument struct {
 //   - "123" (numeric PR number)
 //   - "https://github.com/owner/repo/pull/123" (GitHub PR URL)
 func parsePRArgument(arg string) (PRArgument, error) {
-	// Try parsing as a number first
+	// Try parsing as a number first.
 	if num, err := strconv.Atoi(arg); err == nil {
 		return PRArgument{Number: num}, nil
 	}
 
-	// Try parsing as a GitHub URL
+	// Try parsing as a GitHub URL.
 	parsedURL, err := url.Parse(arg)
 	if err != nil {
 		return PRArgument{}, fmt.Errorf("invalid PR number or URL %q", arg)
 	}
 
-	// Match GitHub PR URL pattern: /owner/repo/pull/number
+	// Match GitHub PR URL pattern: /owner/repo/pull/number.
 	re := regexp.MustCompile(`^/([^/]+)/([^/]+)/pull/(\d+)/?$`)
 	matches := re.FindStringSubmatch(parsedURL.Path)
 	if len(matches) != 4 {
@@ -131,7 +131,7 @@ is extracted from the URL automatically.
 
 	prNumbers := pflag.Args()
 
-	// Parse PR arguments to determine if we have URLs that provide repository info
+	// Parse PR arguments to determine if we have URLs that provide repository info.
 	var parsedPRs []PRArgument
 	var extractedRepo string
 	hasNumericArgs := false
@@ -146,7 +146,7 @@ is extracted from the URL automatically.
 		if prArg.Repo == "" {
 			hasNumericArgs = true
 		} else {
-			// If we have a URL with repository info
+			// If we have a URL with repository info.
 			if extractedRepo == "" {
 				extractedRepo = prArg.Repo
 			} else if extractedRepo != prArg.Repo {
@@ -155,7 +155,7 @@ is extracted from the URL automatically.
 		}
 	}
 
-	// Determine the repository to use
+	// Determine the repository to use.
 	finalRepo := *repo
 	if finalRepo == "" {
 		if extractedRepo != "" {
@@ -166,7 +166,7 @@ is extracted from the URL automatically.
 			os.Exit(1)
 		}
 	} else if extractedRepo != "" && finalRepo != extractedRepo {
-		// Both --repo and URL repo specified, they must match
+		// Both --repo and URL repo specified, they must match.
 		log.Fatalf("URL repository %q does not match --repo argument %q", extractedRepo, finalRepo)
 	}
 
@@ -282,7 +282,7 @@ is extracted from the URL automatically.
 		for _, prItem := range prs {
 			toPost := actions.FilterActions(allActions, prItem.Labels)
 			for _, a := range toPost {
-				// Check throttling if specified
+				// Check throttling if specified.
 				if *throttle > 0 && github.HasRecentComment(prItem, a.Comment, *throttle) {
 					if *debug {
 						fmt.Fprintf(os.Stderr, "Skipping comment for PR #%d: recent duplicate found (throttle: %v)\n", prItem.Number, *throttle)
@@ -332,7 +332,7 @@ is extracted from the URL automatically.
 			ciStatus,
 			yesNo(approved),
 			yesNo(lgtm),
-			yesNo(!okToTest), // ok-to-test = Y if no 'needs-ok-to-test' label
+			yesNo(!okToTest), // ok-to-test = Y if no 'needs-ok-to-test' label.
 			yesNo(hold),
 			pr.AuthorLogin,
 			lastCommented,
@@ -344,14 +344,14 @@ is extracted from the URL automatically.
 	tw.Flush()
 }
 
-// Template data structure for verbose PR output
+// Template data structure for verbose PR output.
 type TemplateData struct {
 	github.PullRequest
 	ShowLogs bool
-	PR       github.PullRequest // For nested access in templates
+	PR       github.PullRequest // For nested access in templates.
 }
 
-// Template helper functions
+// Template helper functions.
 var templateFuncs = template.FuncMap{
 	"yesNo": func(b bool) string {
 		if b {
@@ -505,7 +505,7 @@ func filterByLabelPresence(prs []github.PullRequest, label string) []github.Pull
 	return filtered
 }
 
-// printThrottleDiagnostics shows what the throttling logic would do for debugging
+// printThrottleDiagnostics shows what the throttling logic would do for debugging.
 func printThrottleDiagnostics(prItem github.PullRequest, allActions []actions.Action) {
 	toPost := actions.FilterActions(allActions, prItem.Labels)
 	if len(toPost) == 0 {
@@ -557,13 +557,13 @@ func printThrottleDiagnostics(prItem github.PullRequest, allActions []actions.Ac
 	}
 }
 
-// getLastCommentTime returns when any comment was last posted on the PR
+// getLastCommentTime returns when any comment was last posted on the PR.
 func getLastCommentTime(prItem github.PullRequest) string {
 	if len(prItem.Comments) == 0 {
 		return "never"
 	}
 
-	// Find the most recent comment (any comment)
+	// Find the most recent comment (any comment).
 	var mostRecent time.Time
 	found := false
 
