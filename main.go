@@ -187,7 +187,7 @@ func parseAndValidateArgs() (*Config, error) {
 		})
 	}
 
-	if *okToTest && *printGHCommand {
+	if *okToTest {
 		allActions = append(allActions, actions.Action{
 			Comment:   "/ok-to-test",
 			Label:     "needs-ok-to-test",
@@ -195,7 +195,7 @@ func parseAndValidateArgs() (*Config, error) {
 		})
 	}
 
-	if *lgtm && *printGHCommand {
+	if *lgtm {
 		allActions = append(allActions, actions.Action{
 			Comment:   "/lgtm",
 			Label:     "lgtm",
@@ -203,7 +203,7 @@ func parseAndValidateArgs() (*Config, error) {
 		})
 	}
 
-	if *approve && *printGHCommand {
+	if *approve {
 		allActions = append(allActions, actions.Action{
 			Comment:   "/approve",
 			Label:     "approved",
@@ -281,7 +281,7 @@ func printGroupedFlags() {
 	fmt.Fprintf(os.Stderr, "      --needs-lgtm                Include only PRs missing the 'lgtm' label\n")
 	fmt.Fprintf(os.Stderr, "      --needs-ok-to-test          Include only PRs that have the 'needs-ok-to-test' label\n\n")
 
-	fmt.Fprintf(os.Stderr, "Actions (require --print):\n")
+	fmt.Fprintf(os.Stderr, "Actions:\n")
 	fmt.Fprintf(os.Stderr, "      --approve                   Generate /approve commands for PRs without 'approved' label\n")
 	fmt.Fprintf(os.Stderr, "      --lgtm                      Generate /lgtm commands for PRs without 'lgtm' label\n")
 	fmt.Fprintf(os.Stderr, "      --ok-to-test                Generate /ok-to-test commands for PRs with needs-ok-to-test label\n")
@@ -289,7 +289,6 @@ func printGroupedFlags() {
 	fmt.Fprintf(os.Stderr, "      --throttle duration         Throttle identical comments to limit posting frequency\n\n")
 
 	fmt.Fprintf(os.Stderr, "Output:\n")
-	fmt.Fprintf(os.Stderr, "  -P, --print                     Print as gh commands\n")
 	fmt.Fprintf(os.Stderr, "  -v, --verbose                   Print PR status only\n")
 	fmt.Fprintf(os.Stderr, "  -V, --verbose-verbose           Print PR status with error logs from failing checks\n")
 	fmt.Fprintf(os.Stderr, "  -q, --quiet                     Print PR numbers only\n\n")
@@ -340,8 +339,8 @@ func applyFilters(allRepositoryPRs []RepositoryPRs, config *Config) []Repository
 }
 
 // outputResults handles all output formats based on command line flags.
-func outputResults(allRepositoryPRs []RepositoryPRs, config *Config) {
-	if *printGHCommand {
+func outputResults(allRepositoryPRs []RepositoryPRs, config *Config, shouldPrintCommands bool) {
+	if shouldPrintCommands {
 		for _, repoPRs := range allRepositoryPRs {
 			for _, prItem := range repoPRs.PRs {
 				toPost := actions.FilterActions(config.Actions, prItem.Labels)
@@ -419,7 +418,6 @@ func outputResults(allRepositoryPRs []RepositoryPRs, config *Config) {
 
 var (
 	repo            = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
-	printGHCommand  = pflag.BoolP("print", "P", false, "Print as gh commands")
 	approve         = pflag.Bool("approve", false, "Generate /approve commands for PRs without 'approved' label")
 	author          = pflag.StringP("author", "a", "", "Filter by author (exact match)")
 	authorSubstring = pflag.StringP("author-substring", "A", "", "Filter by author containing text")
@@ -469,10 +467,10 @@ Examples:
   %[1]s -r owner/repo --needs-approve
 
   # Generate approval commands for Dependabot PRs.
-  %[1]s -r owner/repo --author dependabot --approve --print
+  %[1]s -r owner/repo --author dependabot --approve
 
   # Execute the generated commands.
-  %[1]s -r owner/repo --author dependabot --approve --print | sh
+  %[1]s -r owner/repo --author dependabot --approve | sh
 
   # Focus on specific PRs.
   %[1]s -r owner/repo --verbose 123 456
@@ -498,17 +496,11 @@ Examples:
 		os.Exit(1)
 	}
 
-	if (*approve || *lgtm || *okToTest || len(*comment) > 0) && !*printGHCommand {
-		fmt.Fprintf(os.Stderr, "Error: action flags require -P/--print flag\n")
-		os.Exit(1)
-	}
+	// Print gh commands when action flags are used.
+	shouldPrintCommands := (*approve || *lgtm || *okToTest || len(*comment) > 0)
 
-	if *okToTest && !*needsOkToTest && !*printGHCommand {
+	if *okToTest && !*needsOkToTest {
 		fmt.Fprintf(os.Stderr, "Hint: --ok-to-test is an action, not a filter. Use --needs-ok-to-test to filter eligible PRs.\n")
-	}
-
-	if !*printGHCommand && (*approve || *lgtm || *okToTest || len(*comment) > 0) {
-		fmt.Fprintf(os.Stderr, "Warning: Action flags (--approve, --lgtm, --ok-to-test, --comment) require -P/--print to generate gh commands.\n")
 	}
 
 	allRepositoryPRs, err := fetchAllRepositoryPRs(config.Repositories, config.Filter)
@@ -518,7 +510,7 @@ Examples:
 
 	filteredPRs := applyFilters(allRepositoryPRs, config)
 
-	outputResults(filteredPRs, config)
+	outputResults(filteredPRs, config, shouldPrintCommands)
 }
 
 // Template data structure for verbose PR output.
