@@ -51,13 +51,25 @@ mod-tidy-check:
 	go mod tidy
 	git diff --exit-code go.mod go.sum
 
-# Run all checks.
+# Update only direct dependencies (not indirect).
+.PHONY: update-deps
+update-deps:
+	go list -m -f '{{if not .Indirect}}{{.Path}}{{end}}' all | xargs -n1 go get -u
+	go mod tidy
+
+# Update all dependencies including indirect.
+.PHONY: update-all-deps
+update-all-deps:
+	go get -u ./...
+	go mod tidy
+
+# Run all checks (development-friendly).
 .PHONY: check
-check: whitespace-check fmt-check vet mod-tidy-check
+check: whitespace-check fmt vet mod-tidy
 
 # CI target: run all checks and build.
 .PHONY: ci
-ci: check test build
+ci: whitespace-check fmt-check vet mod-tidy-check test build
 
 # Show version that would be built.
 .PHONY: version
@@ -67,16 +79,20 @@ version:
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  build          - Build the binary (default)"
-	@echo "  install        - Install to GOPATH/bin"
-	@echo "  clean          - Remove build artifacts"
-	@echo "  test           - Run tests"
-	@echo "  fmt            - Format code"
-	@echo "  fmt-check      - Format code and check for changes (CI)"
-	@echo "  mod-tidy       - Run go mod tidy"
-	@echo "  vet            - Run go vet"
-	@echo "  mod-tidy-check - Check if go.mod/go.sum need tidying (CI)"
-	@echo "  check          - Run all checks (format, vet, mod-tidy, whitespace)"
-	@echo "  ci             - Run all checks, tests, and build"
-	@echo "  version        - Show version that would be built"
-	@echo "  help           - Show this help"
+	@echo "  build           - Build the binary"
+	@echo "  check           - Run all checks (development-friendly)"
+	@echo "  ci              - Run all CI checks, tests, and build"
+	@echo "  clean           - Remove build artifacts"
+	@echo "  fmt             - Format code"
+	@echo "  fmt-check       - Format code and check for changes (CI)"
+	@echo "  help            - Show this help"
+	@echo "  install         - Install to GOPATH/bin"
+	@echo "  mod-tidy        - Run go mod tidy"
+	@echo "  mod-tidy-check  - Check if go.mod/go.sum need tidying (CI)"
+	@echo "  test            - Run tests"
+	@echo "  update-all-deps - Update all dependencies (direct and indirect)"
+	@echo "  update-deps     - Update direct dependencies to latest versions"
+	@echo "  version         - Show version that would be built"
+	@echo "  vet             - Run go vet"
+	@echo ""
+	@echo "Default target: build"
