@@ -40,8 +40,9 @@ go install github.com/frobware/autoprat@latest
 # See what needs your attention.
 autoprat -r your-org/your-repo --needs-approve --needs-lgtm
 
-# Focus on specific PRs by number.
+# Focus on specific PRs by number or URL.
 autoprat -r your-org/your-repo --verbose 123 456
+autoprat --verbose https://github.com/your-org/your-repo/pull/123
 
 # Approve trusted bot PRs.
 autoprat -r your-org/your-repo --author dependabot --approve --print | sh
@@ -158,11 +159,14 @@ autoprat -r myorg/myrepo --needs-approve --approve --print | sh
 
 ## All Options
 
-### Required
-- `-r, --repo OWNER/REPO` - GitHub repository
+### Repository
+- `-r, --repo OWNER/REPO` - GitHub repository (required when using numeric PR arguments or no PR arguments)
 
 ### Positional Arguments
-- `[PR-NUMBER ...]` - Focus on specific PR numbers (can specify multiple)
+- `[PR-NUMBER|PR-URL ...]` - Focus on specific PRs by number or URL (can specify multiple)
+  - Numbers: `123 456`
+  - URLs: `https://github.com/owner/repo/pull/123`
+  - Mixed: `123 https://github.com/owner/repo/pull/456` (requires `--repo` for numeric args)
 
 ### Filters (combine with AND logic)
 - `--author NAME` - Exact author match
@@ -211,7 +215,7 @@ go build -o autoprat .
 
 1. **Start with filters** - Run without `--print` to see which PRs match
 2. **Review before executing** - Always check generated commands first
-3. **Focus on specific PRs** - Add PR numbers as arguments: `autoprat -r repo -v 123 456`
+3. **Focus on specific PRs** - Add PR numbers or URLs as arguments: `autoprat -r repo -v 123 456` or `autoprat -v https://github.com/owner/repo/pull/123`
 4. **Use throttling** - Prevent spam with `--throttle` in automated workflows
 5. **Combine filters** - Multiple filters use AND logic for precise targeting
 6. **Exact check names** - Use `--failing-check` with exact CI check names for safety

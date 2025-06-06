@@ -20,8 +20,11 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"text/template"
@@ -34,6 +37,46 @@ import (
 
 //go:embed templates/verbose.tmpl
 var verboseTemplate string
+
+// PRArgument represents a parsed PR argument with number and optional repository
+type PRArgument struct {
+	Number int
+	Repo   string // Empty for numeric arguments, populated for URLs
+}
+
+// parsePRArgument extracts a PR number and repository from either a numeric string or GitHub URL.
+// For URLs, extracts both the repository and PR number.
+// For numeric arguments, only returns the PR number.
+// Supports formats:
+//   - "123" (numeric PR number)
+//   - "https://github.com/owner/repo/pull/123" (GitHub PR URL)
+func parsePRArgument(arg string) (PRArgument, error) {
+	// Try parsing as a number first
+	if num, err := strconv.Atoi(arg); err == nil {
+		return PRArgument{Number: num}, nil
+	}
+
+	// Try parsing as a GitHub URL
+	parsedURL, err := url.Parse(arg)
+	if err != nil {
+		return PRArgument{}, fmt.Errorf("invalid PR number or URL %q", arg)
+	}
+
+	// Match GitHub PR URL pattern: /owner/repo/pull/number
+	re := regexp.MustCompile(`^/([^/]+)/([^/]+)/pull/(\d+)/?$`)
+	matches := re.FindStringSubmatch(parsedURL.Path)
+	if len(matches) != 4 {
+		return PRArgument{}, fmt.Errorf("invalid GitHub PR URL %q", arg)
+	}
+
+	urlRepo := matches[1] + "/" + matches[2]
+	prNumber, err := strconv.Atoi(matches[3])
+	if err != nil {
+		return PRArgument{}, fmt.Errorf("invalid PR number in URL %q", arg)
+	}
+
+	return PRArgument{Number: prNumber, Repo: urlRepo}, nil
+}
 
 var (
 	version         = "dev"
@@ -61,11 +104,18 @@ var (
 
 func main() {
 	pflag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [flags] [PR-NUMBER ...]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [flags] [PR-NUMBER|PR-URL ...]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `List and filter open GitHub pull requests.
 
 Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 /ok-to-test, and custom comments.
+
+PR arguments can be either numbers (e.g. "123") or GitHub URLs
+(e.g. "https://github.com/owner/repo/pull/123").
+
+The --repo flag is required when using numeric PR arguments or when
+not providing any PR arguments. When using GitHub URLs, the repository
+is extracted from the URL automatically.
 
 `)
 
@@ -79,18 +129,51 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 		os.Exit(0)
 	}
 
-	if *repo == "" {
-		fmt.Fprintf(os.Stderr, "Error: --repo is required\n\n")
-		pflag.Usage()
-		os.Exit(1)
+	prNumbers := pflag.Args()
+
+	// Parse PR arguments to determine if we have URLs that provide repository info
+	var parsedPRs []PRArgument
+	var extractedRepo string
+	hasNumericArgs := false
+
+	for _, s := range prNumbers {
+		prArg, err := parsePRArgument(s)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+		parsedPRs = append(parsedPRs, prArg)
+
+		if prArg.Repo == "" {
+			hasNumericArgs = true
+		} else {
+			// If we have a URL with repository info
+			if extractedRepo == "" {
+				extractedRepo = prArg.Repo
+			} else if extractedRepo != prArg.Repo {
+				log.Fatalf("Multiple different repositories found in URLs: %q and %q", extractedRepo, prArg.Repo)
+			}
+		}
+	}
+
+	// Determine the repository to use
+	finalRepo := *repo
+	if finalRepo == "" {
+		if extractedRepo != "" {
+			finalRepo = extractedRepo
+		} else if hasNumericArgs || len(prNumbers) == 0 {
+			fmt.Fprintf(os.Stderr, "Error: --repo is required when using numeric PR arguments or no PR arguments\n\n")
+			pflag.Usage()
+			os.Exit(1)
+		}
+	} else if extractedRepo != "" && finalRepo != extractedRepo {
+		// Both --repo and URL repo specified, they must match
+		log.Fatalf("URL repository %q does not match --repo argument %q", extractedRepo, finalRepo)
 	}
 
 	if (*approve || *lgtm || *okToTest || len(*comment) > 0) && !*printGHCommand {
 		fmt.Fprintf(os.Stderr, "Error: action flags require -P/--print flag\n")
 		os.Exit(1)
 	}
-
-	prNumbers := pflag.Args()
 
 	// Convert label strings to LabelFilter with negation
 	// detection.
@@ -127,7 +210,7 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 		fmt.Fprintf(os.Stderr, "Warning: Action flags (--approve, --lgtm, --ok-to-test, --comment) require -P/--print to generate gh commands.\n")
 	}
 
-	client, err := github.NewClient(*repo)
+	client, err := github.NewClient(finalRepo)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}
@@ -147,14 +230,10 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 		prs = filterByLabelPresence(prs, "needs-ok-to-test")
 	}
 
-	if len(prNumbers) > 0 {
-		selected := make(map[int]struct{}, len(prNumbers))
-		for _, s := range prNumbers {
-			var num int
-			if _, err := fmt.Sscanf(s, "%d", &num); err != nil {
-				log.Fatalf("invalid PR number %q: %v", s, err)
-			}
-			selected[num] = struct{}{}
+	if len(parsedPRs) > 0 {
+		selected := make(map[int]struct{}, len(parsedPRs))
+		for _, prArg := range parsedPRs {
+			selected[prArg.Number] = struct{}{}
 		}
 
 		filtered := prs[:0]
@@ -210,7 +289,7 @@ Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 					}
 					continue
 				}
-				fmt.Println(a.Command(*repo, prItem.Number))
+				fmt.Println(a.Command(finalRepo, prItem.Number))
 			}
 		}
 		return
