@@ -51,6 +51,22 @@ mod-tidy-check:
 	go mod tidy
 	git diff --exit-code go.mod go.sum
 
+# Check for available updates to direct dependencies.
+.PHONY: check-updates
+check-updates:
+	@echo "Checking for updates to direct dependencies..."
+	@go list -m -u -f '{{if and (not .Indirect) .Update}}{{.Path}} {{.Version}} -> {{.Update.Version}}{{end}}' all | grep . || echo "All direct dependencies are up to date."
+
+# List available versions for direct dependencies.
+.PHONY: list-versions
+list-versions:
+	@echo "Available versions for direct dependencies:"
+	@go list -m -f '{{if not .Indirect}}{{.Path}}{{end}}' all | tail -n +2 | grep -v '^$$' | while read -r mod; do \
+		echo ""; \
+		echo "$$mod:"; \
+		go list -m -versions "$$mod" | tr ' ' '\n' | tail -10 | sed 's/^/  /'; \
+	done
+
 # Update only direct dependencies (not indirect).
 .PHONY: update-deps
 update-deps:
@@ -81,12 +97,14 @@ help:
 	@echo "Available targets:"
 	@echo "  build           - Build the binary"
 	@echo "  check           - Run all checks (development-friendly)"
+	@echo "  check-updates   - Check for available updates to direct dependencies"
 	@echo "  ci              - Run all CI checks, tests, and build"
 	@echo "  clean           - Remove build artifacts"
 	@echo "  fmt             - Format code"
 	@echo "  fmt-check       - Format code and check for changes (CI)"
 	@echo "  help            - Show this help"
 	@echo "  install         - Install to GOPATH/bin"
+	@echo "  list-versions   - List available versions for direct dependencies"
 	@echo "  mod-tidy        - Run go mod tidy"
 	@echo "  mod-tidy-check  - Check if go.mod/go.sum need tidying (CI)"
 	@echo "  test            - Run tests"
