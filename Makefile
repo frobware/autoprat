@@ -25,11 +25,8 @@ test:
 # Format check.
 .PHONY: fmt-check
 fmt-check:
-	@if [ -n "$$(gofmt -l .)" ]; then \
-		echo "Error: Go code is not properly formatted. Run 'make fmt' to fix:"; \
-		gofmt -l .; \
-		exit 1; \
-	fi
+	gofmt -w .
+	git diff --exit-code
 
 # Format code.
 .PHONY: fmt
