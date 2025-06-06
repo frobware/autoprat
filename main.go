@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -270,7 +271,7 @@ func printGroupedFlags() {
 
 	fmt.Fprintf(os.Stderr, "Other:\n")
 	fmt.Fprintf(os.Stderr, "      --debug                     Enable debug logging\n")
-	fmt.Fprintf(os.Stderr, "      --version                   Show version information (current: %s)\n", version)
+	fmt.Fprintf(os.Stderr, "      --version                   Show version information\n")
 }
 
 // applyFilters applies global filters and PR-specific filtering to all repositories.
@@ -392,7 +393,10 @@ func outputResults(allRepositoryPRs []RepositoryPRs, config *Config) {
 }
 
 var (
-	version         = "dev"
+	version   = "dev"
+	buildDate = "unknown"
+	goVersion = runtime.Version()
+
 	repo            = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
 	printGHCommand  = pflag.BoolP("print", "P", false, "Print as gh commands")
 	approve         = pflag.Bool("approve", false, "Generate /approve commands for PRs without 'approved' label")
@@ -412,7 +416,7 @@ var (
 	needsApprove    = pflag.Bool("needs-approve", false, "Include only PRs missing the 'approved' label")
 	needsLgtm       = pflag.Bool("needs-lgtm", false, "Include only PRs missing the 'lgtm' label")
 	needsOkToTest   = pflag.Bool("needs-ok-to-test", false, "Include only PRs that have the 'needs-ok-to-test' label")
-	showVersion     = pflag.Bool("version", false, fmt.Sprintf("Show version information (current: %s)", version))
+	showVersion     = pflag.Bool("version", false, "Show version information")
 )
 
 func main() {
@@ -438,7 +442,10 @@ is extracted from the URL automatically.
 	pflag.Parse()
 
 	if *showVersion {
-		fmt.Println(version)
+		fmt.Printf("autoprat version %s\n", version)
+		fmt.Printf("Built: %s\n", buildDate)
+		fmt.Printf("Go version: %s\n", goVersion)
+		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
 	}
 

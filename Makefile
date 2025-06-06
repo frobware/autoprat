@@ -1,34 +1,38 @@
-# Get version from git, fallback to 'dev' if no tags exist
-VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo "dev")
+# Git-aware version detection with fallback to "dev".
+GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo "")
+VERSION ?= $(if $(GIT_VERSION),$(GIT_VERSION),dev)
 
-# Build flags
-LDFLAGS = -X main.version=$(VERSION)
+# Get build date in RFC3339 format.
+BUILD_DATE ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "unknown")
 
-# Default target
+# Build flags.
+LDFLAGS = -X main.version=$(VERSION) -X main.buildDate=$(BUILD_DATE)
+
+# Default target.
 .PHONY: all
 all: build
 
-# Build the binary
+# Build the binary.
 .PHONY: build
 build: fmt
 	go build -ldflags "$(LDFLAGS)" -o autoprat .
 
-# Install to GOPATH/bin
+# Install to GOPATH/bin.
 .PHONY: install
 install:
 	go install -ldflags "$(LDFLAGS)" .
 
-# Clean build artifacts
+# Clean build artifacts.
 .PHONY: clean
 clean:
 	rm -f autoprat
 
-# Run tests
+# Run tests.
 .PHONY: test
 test:
 	go test -v ./...
 
-# Format check
+# Format check.
 .PHONY: fmt-check
 fmt-check:
 	@if [ -n "$$(gofmt -l .)" ]; then \
@@ -37,17 +41,17 @@ fmt-check:
 		exit 1; \
 	fi
 
-# Format code
+# Format code.
 .PHONY: fmt
 fmt:
 	gofmt -w .
 
-# Vet code
+# Vet code.
 .PHONY: vet
 vet:
 	go vet ./...
 
-# Check for whitespace issues
+# Check for whitespace issues.
 .PHONY: whitespace-check
 whitespace-check:
 	@if git diff --check --cached | grep .; then \
@@ -59,7 +63,7 @@ whitespace-check:
 		fi; \
 	fi
 
-# Verify go.mod and go.sum are tidy
+# Verify go.mod and go.sum are tidy.
 .PHONY: mod-tidy-check
 mod-tidy-check:
 	@cp go.mod go.mod.backup
@@ -73,20 +77,20 @@ mod-tidy-check:
 	fi
 	@rm go.mod.backup go.sum.backup
 
-# Run all checks
+# Run all checks.
 .PHONY: check
 check: whitespace-check fmt-check vet mod-tidy-check
 
-# CI target: run all checks and build
+# CI target: run all checks and build.
 .PHONY: ci
 ci: check test build
 
-# Show version that would be built
+# Show version that would be built.
 .PHONY: version
 version:
 	@echo $(VERSION)
 
-# Development build (same as build, but explicit)
+# Development build (same as build, but explicit).
 .PHONY: dev
 dev: build
 
