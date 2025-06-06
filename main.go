@@ -86,6 +86,278 @@ type RepositoryPRs struct {
 	PRs        []github.PullRequest
 }
 
+// Config holds all configuration and arguments for the application.
+type Config struct {
+	Repositories []string
+	ParsedPRs    []PRArgument
+	Filter       github.Filter
+	Actions      []actions.Action
+}
+
+// parseAndValidateArgs parses command line arguments and validates
+// repository requirements.
+func parseAndValidateArgs() (*Config, error) {
+	prNumbers := pflag.Args()
+
+	var parsedPRs []PRArgument
+	repositories := make(map[string]bool)
+	hasNumericArgs := false
+
+	for _, s := range prNumbers {
+		prArg, err := parsePRArgument(s)
+		if err != nil {
+			return nil, err
+		}
+		parsedPRs = append(parsedPRs, prArg)
+
+		if prArg.Repo == "" {
+			hasNumericArgs = true
+		} else {
+			repositories[prArg.Repo] = true
+		}
+	}
+
+	if *repo != "" {
+		repositories[*repo] = true
+	}
+
+	if len(repositories) == 0 && (hasNumericArgs || len(prNumbers) == 0) {
+		return nil, fmt.Errorf("--repo is required when using numeric PR arguments or no PR arguments")
+	}
+
+	var repoList []string
+	for repo := range repositories {
+		repoList = append(repoList, repo)
+	}
+	sort.Strings(repoList)
+
+	var labels []github.LabelFilter
+	for _, rawLabel := range *label {
+		negate := false
+		labelName := rawLabel
+		if strings.HasPrefix(rawLabel, "!") {
+			negate = true
+			labelName = strings.TrimPrefix(rawLabel, "!")
+		}
+		labels = append(labels, github.LabelFilter{
+			Name:   labelName,
+			Negate: negate,
+		})
+	}
+
+	filter := github.Filter{
+		Labels:          labels,
+		Author:          *author,
+		AuthorSubstring: *authorSubstring,
+		OnlyFailingCI:   *failingCI,
+		FailingChecks:   *failingCheck,
+	}
+
+	var allActions []actions.Action
+	for _, c := range *comment {
+		allActions = append(allActions, actions.Action{
+			Comment:   c,
+			Predicate: actions.PredicateNone,
+		})
+	}
+
+	if *okToTest && *printGHCommand {
+		allActions = append(allActions, actions.Action{
+			Comment:   "/ok-to-test",
+			Label:     "needs-ok-to-test",
+			Predicate: actions.PredicateOnlyIfLabelExists,
+		})
+	}
+
+	if *lgtm && *printGHCommand {
+		allActions = append(allActions, actions.Action{
+			Comment:   "/lgtm",
+			Label:     "lgtm",
+			Predicate: actions.PredicateSkipIfLabelExists,
+		})
+	}
+
+	if *approve && *printGHCommand {
+		allActions = append(allActions, actions.Action{
+			Comment:   "/approve",
+			Label:     "approved",
+			Predicate: actions.PredicateSkipIfLabelExists,
+		})
+	}
+
+	return &Config{
+		Repositories: repoList,
+		ParsedPRs:    parsedPRs,
+		Filter:       filter,
+		Actions:      allActions,
+	}, nil
+}
+
+// fetchAllRepositoryPRs fetches PRs from all repositories in parallel.
+func fetchAllRepositoryPRs(repositories []string, filter github.Filter) ([]RepositoryPRs, error) {
+	var allRepositoryPRs []RepositoryPRs
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	errChan := make(chan error, len(repositories))
+
+	for _, repository := range repositories {
+		wg.Add(1)
+		go func(repo string) {
+			defer wg.Done()
+
+			client, err := github.NewClient(repo)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to create client for %s: %v", repo, err)
+				return
+			}
+
+			prs, err := client.List(filter)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to list PRs for %s: %v", repo, err)
+				return
+			}
+
+			mu.Lock()
+			allRepositoryPRs = append(allRepositoryPRs, RepositoryPRs{
+				Repository: repo,
+				PRs:        prs,
+			})
+			mu.Unlock()
+		}(repository)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	for err := range errChan {
+		return nil, err
+	}
+
+	sort.Slice(allRepositoryPRs, func(i, j int) bool {
+		return allRepositoryPRs[i].Repository < allRepositoryPRs[j].Repository
+	})
+
+	return allRepositoryPRs, nil
+}
+
+// applyFilters applies global filters and PR-specific filtering to all repositories.
+func applyFilters(allRepositoryPRs []RepositoryPRs, config *Config) []RepositoryPRs {
+	for i := range allRepositoryPRs {
+		prs := allRepositoryPRs[i].PRs
+
+		if *needsApprove {
+			prs = filterByLabelAbsence(prs, "approved")
+		}
+		if *needsLgtm {
+			prs = filterByLabelAbsence(prs, "lgtm")
+		}
+		if *needsOkToTest {
+			prs = filterByLabelPresence(prs, "needs-ok-to-test")
+		}
+
+		if len(config.ParsedPRs) > 0 {
+			selected := make(map[int]struct{})
+			for _, prArg := range config.ParsedPRs {
+				if prArg.Repo == "" || prArg.Repo == allRepositoryPRs[i].Repository {
+					selected[prArg.Number] = struct{}{}
+				}
+			}
+
+			if len(selected) > 0 {
+				filtered := prs[:0]
+				for _, pr := range prs {
+					if _, ok := selected[pr.Number]; ok {
+						filtered = append(filtered, pr)
+					}
+				}
+				prs = filtered
+			}
+		}
+
+		allRepositoryPRs[i].PRs = prs
+	}
+
+	return allRepositoryPRs
+}
+
+// outputResults handles all output formats based on command line flags.
+func outputResults(allRepositoryPRs []RepositoryPRs, config *Config) {
+	if *printGHCommand {
+		for _, repoPRs := range allRepositoryPRs {
+			for _, prItem := range repoPRs.PRs {
+				toPost := actions.FilterActions(config.Actions, prItem.Labels)
+				for _, a := range toPost {
+					if *throttle > 0 && github.HasRecentComment(prItem, a.Comment, *throttle) {
+						if *debug {
+							fmt.Fprintf(os.Stderr, "Skipping comment for PR #%d: recent duplicate found (throttle: %v)\n", prItem.Number, *throttle)
+						}
+						continue
+					}
+					fmt.Println(a.Command(repoPRs.Repository, prItem.Number))
+				}
+			}
+		}
+		return
+	}
+
+	if *verbose || *verboseVerbose {
+		for _, repoPRs := range allRepositoryPRs {
+			if len(repoPRs.PRs) > 0 {
+				fmt.Printf("Repository: %s\n", repoPRs.Repository)
+				fmt.Println(strings.Repeat("=", len(repoPRs.Repository)+12))
+				for _, pr := range repoPRs.PRs {
+					printVerbosePR(pr, *verboseVerbose)
+					if *throttle > 0 {
+						printThrottleDiagnostics(pr, config.Actions)
+					}
+					fmt.Println()
+				}
+				fmt.Println()
+			}
+		}
+		return
+	}
+
+	if *quiet {
+		for _, repoPRs := range allRepositoryPRs {
+			for _, pr := range repoPRs.PRs {
+				fmt.Println(pr.Number)
+			}
+		}
+		return
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	headerRow := "REPOSITORY\tPR URL\tCI\tAPPROVED\tLGTM\tOK2TEST\tHOLD\tAUTHOR\tLAST_COMMENTED\tTITLE"
+	fmt.Fprintln(tw, headerRow)
+
+	for _, repoPRs := range allRepositoryPRs {
+		for _, pr := range repoPRs.PRs {
+			approved := contains(pr.Labels, "approved")
+			lgtm := contains(pr.Labels, "lgtm")
+			okToTest := contains(pr.Labels, "needs-ok-to-test")
+			hold := contains(pr.Labels, "do-not-merge/hold")
+
+			ciStatus := summarizeCIStatus(pr.StatusCheckRollup.Contexts.Nodes)
+			lastCommented := getLastCommentTime(pr)
+			row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
+				repoPRs.Repository,
+				pr.URL,
+				ciStatus,
+				yesNo(approved),
+				yesNo(lgtm),
+				yesNo(!okToTest),
+				yesNo(hold),
+				pr.AuthorLogin,
+				lastCommented,
+				pr.Title,
+			)
+			fmt.Fprintln(tw, row)
+		}
+	}
+	tw.Flush()
+}
+
 var (
 	version         = "dev"
 	repo            = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
@@ -137,279 +409,34 @@ is extracted from the URL automatically.
 		os.Exit(0)
 	}
 
-	prNumbers := pflag.Args()
-
-	// Parse PR arguments and collect repositories.
-	var parsedPRs []PRArgument
-	repositories := make(map[string]bool)
-	hasNumericArgs := false
-
-	for _, s := range prNumbers {
-		prArg, err := parsePRArgument(s)
-		if err != nil {
-			log.Fatalf("%v", err)
-		}
-		parsedPRs = append(parsedPRs, prArg)
-
-		if prArg.Repo == "" {
-			hasNumericArgs = true
-		} else {
-			repositories[prArg.Repo] = true
-		}
-	}
-
-	// Add --repo to the list if specified.
-	if *repo != "" {
-		repositories[*repo] = true
-	}
-
-	// Validate repository requirements.
-	if len(repositories) == 0 && (hasNumericArgs || len(prNumbers) == 0) {
-		fmt.Fprintf(os.Stderr, "Error: --repo is required when using numeric PR arguments or no PR arguments\n\n")
+	config, err := parseAndValidateArgs()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
 		pflag.Usage()
 		os.Exit(1)
 	}
-
-	// Convert repositories map to sorted slice.
-	var repoList []string
-	for repo := range repositories {
-		repoList = append(repoList, repo)
-	}
-	sort.Strings(repoList)
 
 	if (*approve || *lgtm || *okToTest || len(*comment) > 0) && !*printGHCommand {
 		fmt.Fprintf(os.Stderr, "Error: action flags require -P/--print flag\n")
 		os.Exit(1)
 	}
 
-	// Convert label strings to LabelFilter with negation
-	// detection.
-	var labels []github.LabelFilter
-	for _, rawLabel := range *label {
-		negate := false
-		labelName := rawLabel
-		if strings.HasPrefix(rawLabel, "!") {
-			negate = true
-			labelName = strings.TrimPrefix(rawLabel, "!")
-		}
-		labels = append(labels, github.LabelFilter{
-			Name:   labelName,
-			Negate: negate,
-		})
-	}
-
-	filter := github.Filter{
-		Labels:          labels,
-		Author:          *author,
-		AuthorSubstring: *authorSubstring,
-		OnlyFailingCI:   *failingCI,
-		FailingChecks:   *failingCheck,
-	}
-
-	// Warn if --ok-to-test is used without --needs-ok-to-test and
-	// not printing commands.
 	if *okToTest && !*needsOkToTest && !*printGHCommand {
 		fmt.Fprintf(os.Stderr, "Hint: --ok-to-test is an action, not a filter. Use --needs-ok-to-test to filter eligible PRs.\n")
 	}
 
-	// Warn if action flags are used without -P flag.
 	if !*printGHCommand && (*approve || *lgtm || *okToTest || len(*comment) > 0) {
 		fmt.Fprintf(os.Stderr, "Warning: Action flags (--approve, --lgtm, --ok-to-test, --comment) require -P/--print to generate gh commands.\n")
 	}
 
-	// Fetch PRs from all repositories in parallel.
-	var allRepositoryPRs []RepositoryPRs
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	errChan := make(chan error, len(repoList))
-
-	for _, repository := range repoList {
-		wg.Add(1)
-		go func(repo string) {
-			defer wg.Done()
-
-			client, err := github.NewClient(repo)
-			if err != nil {
-				errChan <- fmt.Errorf("failed to create client for %s: %v", repo, err)
-				return
-			}
-
-			prs, err := client.List(filter)
-			if err != nil {
-				errChan <- fmt.Errorf("failed to list PRs for %s: %v", repo, err)
-				return
-			}
-
-			mu.Lock()
-			allRepositoryPRs = append(allRepositoryPRs, RepositoryPRs{
-				Repository: repo,
-				PRs:        prs,
-			})
-			mu.Unlock()
-		}(repository)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	// Check for errors.
-	for err := range errChan {
+	allRepositoryPRs, err := fetchAllRepositoryPRs(config.Repositories, config.Filter)
+	if err != nil {
 		log.Fatalf("%v", err)
 	}
 
-	// Sort repositories by name for consistent output.
-	sort.Slice(allRepositoryPRs, func(i, j int) bool {
-		return allRepositoryPRs[i].Repository < allRepositoryPRs[j].Repository
-	})
+	filteredPRs := applyFilters(allRepositoryPRs, config)
 
-	// Apply global filters to all repositories.
-	for i := range allRepositoryPRs {
-		prs := allRepositoryPRs[i].PRs
-
-		if *needsApprove {
-			prs = filterByLabelAbsence(prs, "approved")
-		}
-		if *needsLgtm {
-			prs = filterByLabelAbsence(prs, "lgtm")
-		}
-		if *needsOkToTest {
-			prs = filterByLabelPresence(prs, "needs-ok-to-test")
-		}
-
-		// Apply PR-specific filtering if URLs were provided.
-		if len(parsedPRs) > 0 {
-			selected := make(map[int]struct{})
-			for _, prArg := range parsedPRs {
-				if prArg.Repo == "" || prArg.Repo == allRepositoryPRs[i].Repository {
-					selected[prArg.Number] = struct{}{}
-				}
-			}
-
-			if len(selected) > 0 {
-				filtered := prs[:0]
-				for _, pr := range prs {
-					if _, ok := selected[pr.Number]; ok {
-						filtered = append(filtered, pr)
-					}
-				}
-				prs = filtered
-			}
-		}
-
-		allRepositoryPRs[i].PRs = prs
-	}
-
-	var allActions []actions.Action
-
-	for _, c := range *comment {
-		allActions = append(allActions, actions.Action{
-			Comment:   c,
-			Predicate: actions.PredicateNone,
-		})
-	}
-
-	if *okToTest && *printGHCommand {
-		allActions = append(allActions, actions.Action{
-			Comment:   "/ok-to-test",
-			Label:     "needs-ok-to-test",
-			Predicate: actions.PredicateOnlyIfLabelExists,
-		})
-	}
-
-	if *lgtm && *printGHCommand {
-		allActions = append(allActions, actions.Action{
-			Comment:   "/lgtm",
-			Label:     "lgtm",
-			Predicate: actions.PredicateSkipIfLabelExists,
-		})
-	}
-
-	if *approve && *printGHCommand {
-		allActions = append(allActions, actions.Action{
-			Comment:   "/approve",
-			Label:     "approved",
-			Predicate: actions.PredicateSkipIfLabelExists,
-		})
-	}
-
-	if *printGHCommand {
-		for _, repoPRs := range allRepositoryPRs {
-			for _, prItem := range repoPRs.PRs {
-				toPost := actions.FilterActions(allActions, prItem.Labels)
-				for _, a := range toPost {
-					// Check throttling if specified.
-					if *throttle > 0 && github.HasRecentComment(prItem, a.Comment, *throttle) {
-						if *debug {
-							fmt.Fprintf(os.Stderr, "Skipping comment for PR #%d: recent duplicate found (throttle: %v)\n", prItem.Number, *throttle)
-						}
-						continue
-					}
-					fmt.Println(a.Command(repoPRs.Repository, prItem.Number))
-				}
-			}
-		}
-		return
-	}
-
-	if *verbose || *verboseVerbose {
-		for _, repoPRs := range allRepositoryPRs {
-			if len(repoPRs.PRs) > 0 {
-				fmt.Printf("Repository: %s\n", repoPRs.Repository)
-				fmt.Println(strings.Repeat("=", len(repoPRs.Repository)+12))
-				for _, pr := range repoPRs.PRs {
-					printVerbosePR(pr, *verboseVerbose)
-					if *throttle > 0 {
-						printThrottleDiagnostics(pr, allActions)
-					}
-					fmt.Println()
-				}
-				fmt.Println()
-			}
-		}
-		return
-	}
-
-	if *quiet {
-		for _, repoPRs := range allRepositoryPRs {
-			for _, pr := range repoPRs.PRs {
-				fmt.Println(pr.Number)
-			}
-		}
-		return
-	}
-
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-
-	headerRow := "REPOSITORY\tPR URL\tCI\tAPPROVED\tLGTM\tOK2TEST\tHOLD\tAUTHOR\tLAST_COMMENTED\tTITLE"
-	fmt.Fprintln(tw, headerRow)
-
-	for _, repoPRs := range allRepositoryPRs {
-		for _, pr := range repoPRs.PRs {
-			approved := contains(pr.Labels, "approved")
-			lgtm := contains(pr.Labels, "lgtm")
-			okToTest := contains(pr.Labels, "needs-ok-to-test")
-			hold := contains(pr.Labels, "do-not-merge/hold")
-
-			ciStatus := summarizeCIStatus(pr.StatusCheckRollup.Contexts.Nodes)
-
-			lastCommented := getLastCommentTime(pr)
-			row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
-				repoPRs.Repository,
-				pr.URL,
-				ciStatus,
-				yesNo(approved),
-				yesNo(lgtm),
-				yesNo(!okToTest), // ok-to-test = Y if no 'needs-ok-to-test' label.
-				yesNo(hold),
-				pr.AuthorLogin,
-				lastCommented,
-				pr.Title,
-			)
-
-			fmt.Fprintln(tw, row)
-		}
-	}
-	tw.Flush()
+	outputResults(filteredPRs, config)
 }
 
 // Template data structure for verbose PR output.
@@ -573,7 +600,8 @@ func filterByLabelPresence(prs []github.PullRequest, label string) []github.Pull
 	return filtered
 }
 
-// printThrottleDiagnostics shows what the throttling logic would do for debugging.
+// printThrottleDiagnostics shows what the throttling logic would do
+// for debugging.
 func printThrottleDiagnostics(prItem github.PullRequest, allActions []actions.Action) {
 	toPost := actions.FilterActions(allActions, prItem.Labels)
 	if len(toPost) == 0 {
@@ -625,7 +653,8 @@ func printThrottleDiagnostics(prItem github.PullRequest, allActions []actions.Ac
 	}
 }
 
-// getLastCommentTime returns when any comment was last posted on the PR.
+// getLastCommentTime returns when any comment was last posted on the
+// PR.
 func getLastCommentTime(prItem github.PullRequest) string {
 	if len(prItem.Comments) == 0 {
 		return "never"
