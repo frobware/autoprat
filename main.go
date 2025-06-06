@@ -240,6 +240,39 @@ func fetchAllRepositoryPRs(repositories []string, filter github.Filter) ([]Repos
 	return allRepositoryPRs, nil
 }
 
+// printGroupedFlags prints command line flags organized into logical groups.
+func printGroupedFlags() {
+	fmt.Fprintf(os.Stderr, "Repository:\n")
+	fmt.Fprintf(os.Stderr, "  -r, --repo string               GitHub repo (owner/repo)\n\n")
+
+	fmt.Fprintf(os.Stderr, "Filters:\n")
+	fmt.Fprintf(os.Stderr, "  -a, --author string             Filter by author (exact match)\n")
+	fmt.Fprintf(os.Stderr, "  -A, --author-substring string   Filter by author containing text\n")
+	fmt.Fprintf(os.Stderr, "  -l, --label strings             Filter by label (prefix with ! to negate)\n")
+	fmt.Fprintf(os.Stderr, "  -f, --failing-ci                Only show PRs with failing CI\n")
+	fmt.Fprintf(os.Stderr, "      --failing-check strings     Only show PRs where specific CI check is failing (exact match)\n")
+	fmt.Fprintf(os.Stderr, "      --needs-approve             Include only PRs missing the 'approved' label\n")
+	fmt.Fprintf(os.Stderr, "      --needs-lgtm                Include only PRs missing the 'lgtm' label\n")
+	fmt.Fprintf(os.Stderr, "      --needs-ok-to-test          Include only PRs that have the 'needs-ok-to-test' label\n\n")
+
+	fmt.Fprintf(os.Stderr, "Actions (require --print):\n")
+	fmt.Fprintf(os.Stderr, "      --approve                   Generate /approve commands for PRs without 'approved' label\n")
+	fmt.Fprintf(os.Stderr, "      --lgtm                      Generate /lgtm commands for PRs without 'lgtm' label\n")
+	fmt.Fprintf(os.Stderr, "      --ok-to-test                Generate /ok-to-test commands for PRs with needs-ok-to-test label\n")
+	fmt.Fprintf(os.Stderr, "  -c, --comment strings           Generate comment commands\n")
+	fmt.Fprintf(os.Stderr, "      --throttle duration         Throttle identical comments to limit posting frequency\n\n")
+
+	fmt.Fprintf(os.Stderr, "Output:\n")
+	fmt.Fprintf(os.Stderr, "  -P, --print                     Print as gh commands\n")
+	fmt.Fprintf(os.Stderr, "  -v, --verbose                   Print PR status only\n")
+	fmt.Fprintf(os.Stderr, "  -V, --verbose-verbose           Print PR status with error logs from failing checks\n")
+	fmt.Fprintf(os.Stderr, "  -q, --quiet                     Print PR numbers only\n\n")
+
+	fmt.Fprintf(os.Stderr, "Other:\n")
+	fmt.Fprintf(os.Stderr, "      --debug                     Enable debug logging\n")
+	fmt.Fprintf(os.Stderr, "      --version                   Show version information (current: %s)\n", version)
+}
+
 // applyFilters applies global filters and PR-specific filtering to all repositories.
 func applyFilters(allRepositoryPRs []RepositoryPRs, config *Config) []RepositoryPRs {
 	for i := range allRepositoryPRs {
@@ -399,7 +432,7 @@ is extracted from the URL automatically.
 
 `)
 
-		pflag.PrintDefaults()
+		printGroupedFlags()
 	}
 
 	pflag.Parse()

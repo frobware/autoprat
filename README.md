@@ -117,6 +117,8 @@ autoprat --author-substring "dependabot" --approve --print \
 
 ## How It Works
 
+**Workflow:** specify repository → apply filters → choose actions → select output format
+
 1. **Parallel API calls** fetch all open PRs from specified repositories with labels, CI status, and recent comments
 2. **Filter in memory** using your criteria (author, labels, CI status, etc.) applied globally across all repositories
 3. **Generate standard gh commands** that you can review before executing
