@@ -444,8 +444,8 @@ is extracted from the URL automatically.
 
 	config, err := parseAndValidateArgs()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
 		pflag.Usage()
+		fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
 		os.Exit(1)
 	}
 
