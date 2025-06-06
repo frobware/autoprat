@@ -24,6 +24,7 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strconv"
@@ -79,6 +80,30 @@ func parsePRArgument(arg string) (PRArgument, error) {
 	}
 
 	return PRArgument{Number: prNumber, Repo: urlRepo}, nil
+}
+
+// getBuildInfo returns version information from runtime build info.
+func getBuildInfo() (string, string, string) {
+	buildVersion := "unknown"
+	buildTime := "unknown"
+	goVer := runtime.Version()
+
+	if info, ok := debug.ReadBuildInfo(); ok {
+		// Use module version if available.
+		if info.Main.Version != "(devel)" && info.Main.Version != "" {
+			buildVersion = info.Main.Version
+		}
+
+		// Look for VCS information.
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.time":
+				buildTime = setting.Value
+			}
+		}
+	}
+
+	return buildVersion, buildTime, goVer
 }
 
 // RepositoryPRs holds PRs from a specific repository.
@@ -322,7 +347,7 @@ func outputResults(allRepositoryPRs []RepositoryPRs, config *Config) {
 				toPost := actions.FilterActions(config.Actions, prItem.Labels)
 				for _, a := range toPost {
 					if *throttle > 0 && github.HasRecentComment(prItem, a.Comment, *throttle) {
-						if *debug {
+						if *debugMode {
 							fmt.Fprintf(os.Stderr, "Skipping comment for PR #%d: recent duplicate found (throttle: %v)\n", prItem.Number, *throttle)
 						}
 						continue
@@ -393,10 +418,6 @@ func outputResults(allRepositoryPRs []RepositoryPRs, config *Config) {
 }
 
 var (
-	version   = "dev"
-	buildDate = "unknown"
-	goVersion = runtime.Version()
-
 	repo            = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
 	printGHCommand  = pflag.BoolP("print", "P", false, "Print as gh commands")
 	approve         = pflag.Bool("approve", false, "Generate /approve commands for PRs without 'approved' label")
@@ -404,7 +425,7 @@ var (
 	authorSubstring = pflag.StringP("author-substring", "A", "", "Filter by author containing text")
 	comment         = pflag.StringSliceP("comment", "c", nil, "Generate comment commands")
 	throttle        = pflag.Duration("throttle", 0, "Throttle identical comments to limit posting frequency (e.g. 5m, 1h)")
-	debug           = pflag.Bool("debug", false, "Enable debug logging")
+	debugMode       = pflag.Bool("debug", false, "Enable debug logging")
 	failingCI       = pflag.BoolP("failing-ci", "f", false, "Only show PRs with failing CI")
 	failingCheck    = pflag.StringSlice("failing-check", nil, "Only show PRs where specific CI check is failing (exact match, e.g. 'ci/prow/test-fmt')")
 	label           = pflag.StringSliceP("label", "l", nil, "Filter by label (prefix with ! to negate)")
@@ -442,9 +463,10 @@ is extracted from the URL automatically.
 	pflag.Parse()
 
 	if *showVersion {
-		fmt.Printf("autoprat version %s\n", version)
-		fmt.Printf("Built: %s\n", buildDate)
-		fmt.Printf("Go version: %s\n", goVersion)
+		buildVersion, buildTime, goVer := getBuildInfo()
+		fmt.Printf("autoprat version %s\n", buildVersion)
+		fmt.Printf("Built: %s\n", buildTime)
+		fmt.Printf("Go version: %s\n", goVer)
 		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
 	}

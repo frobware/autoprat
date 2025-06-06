@@ -1,13 +1,3 @@
-# Git-aware version detection with fallback to "dev".
-GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo "")
-VERSION ?= $(if $(GIT_VERSION),$(GIT_VERSION),dev)
-
-# Get build date in RFC3339 format.
-BUILD_DATE ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "unknown")
-
-# Build flags.
-LDFLAGS = -X main.version=$(VERSION) -X main.buildDate=$(BUILD_DATE)
-
 # Default target.
 .PHONY: all
 all: build
@@ -15,12 +5,12 @@ all: build
 # Build the binary.
 .PHONY: build
 build: fmt
-	go build -ldflags "$(LDFLAGS)" -o autoprat .
+	go build -o autoprat .
 
 # Install to GOPATH/bin.
 .PHONY: install
 install:
-	go install -ldflags "$(LDFLAGS)" .
+	go install .
 
 # Clean build artifacts.
 .PHONY: clean
@@ -88,7 +78,7 @@ ci: check test build
 # Show version that would be built.
 .PHONY: version
 version:
-	@echo $(VERSION)
+	@go build -o autoprat-temp . && ./autoprat-temp --version | head -1 | awk '{print $$3}' && rm autoprat-temp
 
 # Development build (same as build, but explicit).
 .PHONY: dev

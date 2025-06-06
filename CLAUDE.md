@@ -1,0 +1,1 @@
+When creating git commit messages ensure we haven't introduced any whitespace change, use British English, prefer prose, use the imperative mood, wrap with emacs fill-paragraph. Do not add an authored-by or co-authored-by sign-off.

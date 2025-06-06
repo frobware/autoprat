@@ -227,13 +227,16 @@ autoprat -r myorg/myrepo --needs-approve --approve --print | sh
 
 ### Install
 ```bash
-# Using go install (recommended).
+# Install latest version.
 go install github.com/frobware/autoprat@latest
+
+# Install specific version (when tagged).
+go install github.com/frobware/autoprat@v1.0.0
 
 # Or build from source.
 git clone https://github.com/frobware/autoprat.git
 cd autoprat
-go build -o autoprat .
+make build
 ```
 
 ## Tips
