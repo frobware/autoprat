@@ -44,6 +44,9 @@ autoprat -r your-org/your-repo --needs-approve --needs-lgtm
 autoprat -r your-org/your-repo --verbose 123 456
 autoprat --verbose https://github.com/your-org/your-repo/pull/123
 
+# Monitor PRs across multiple repositories.
+autoprat --verbose https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456
+
 # Approve trusted bot PRs.
 autoprat -r your-org/your-repo --author dependabot --approve --print | sh
 
@@ -93,10 +96,29 @@ autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "!do
 autoprat -r myorg/myrepo --author "trusted-contributor" --needs-approve
 ```
 
+### Multi-Repository Workflows
+```bash
+# Monitor related PRs across multiple repositories.
+autoprat --verbose \
+  https://github.com/myorg/backend/pull/123 \
+  https://github.com/myorg/frontend/pull/456
+
+# Apply filters across multiple repositories.
+autoprat --author dependabot --approve --print \
+  https://github.com/myorg/repo1/pull/123 \
+  https://github.com/myorg/repo2/pull/456
+
+# Bulk approve Dependabot PRs across an organization.
+autoprat --author-substring "dependabot" --approve --print \
+  https://github.com/myorg/backend/pull/789 \
+  https://github.com/myorg/frontend/pull/101 \
+  https://github.com/myorg/docs/pull/202
+```
+
 ## How It Works
 
-1. **Single API call** fetches all open PRs with labels, CI status, and recent comments
-2. **Filter in memory** using your criteria (author, labels, CI status, etc.)
+1. **Parallel API calls** fetch all open PRs from specified repositories with labels, CI status, and recent comments
+2. **Filter in memory** using your criteria (author, labels, CI status, etc.) applied globally across all repositories
 3. **Generate standard gh commands** that you can review before executing
 4. **Execute selectively** by piping to shell or running commands individually
 
@@ -164,9 +186,10 @@ autoprat -r myorg/myrepo --needs-approve --approve --print | sh
 
 ### Positional Arguments
 - `[PR-NUMBER|PR-URL ...]` - Focus on specific PRs by number or URL (can specify multiple)
-  - Numbers: `123 456`
+  - Numbers: `123 456` (requires `--repo`)
   - URLs: `https://github.com/owner/repo/pull/123`
   - Mixed: `123 https://github.com/owner/repo/pull/456` (requires `--repo` for numeric args)
+  - Multi-repo: `https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456`
 
 ### Filters (combine with AND logic)
 - `--author NAME` - Exact author match
@@ -216,6 +239,7 @@ go build -o autoprat .
 1. **Start with filters** - Run without `--print` to see which PRs match
 2. **Review before executing** - Always check generated commands first
 3. **Focus on specific PRs** - Add PR numbers or URLs as arguments: `autoprat -r repo -v 123 456` or `autoprat -v https://github.com/owner/repo/pull/123`
+   **Multi-repository** - Monitor PRs across repositories: `autoprat -v https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456`
 4. **Use throttling** - Prevent spam with `--throttle` in automated workflows
 5. **Combine filters** - Multiple filters use AND logic for precise targeting
 6. **Exact check names** - Use `--failing-check` with exact CI check names for safety
@@ -223,7 +247,8 @@ go build -o autoprat .
 
 ## Why autoprat?
 
-- **Fast**: Single API call, no per-PR requests
+- **Fast**: Parallel API calls, no per-PR requests
+- **Multi-repository**: Monitor and act across multiple repositories simultaneously
 - **Safe**: Review all commands before execution + idempotent built-in actions
 - **Smart**: Built-in actions check labels to avoid duplicate comments
 - **Flexible**: Powerful filtering with simple Unix pipes
