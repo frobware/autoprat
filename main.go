@@ -22,6 +22,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"runtime/debug"
@@ -122,7 +123,7 @@ type Config struct {
 
 // parseAndValidateArgs parses command line arguments and validates
 // repository requirements.
-func parseAndValidateArgs() (*Config, error) {
+func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[string]*bool) (*Config, error) {
 	prNumbers := pflag.Args()
 
 	var parsedPRs []PRArgument
@@ -187,28 +188,13 @@ func parseAndValidateArgs() (*Config, error) {
 		})
 	}
 
-	if *okToTest {
-		allActions = append(allActions, actions.Action{
-			Comment:   "/ok-to-test",
-			Label:     "needs-ok-to-test",
-			Predicate: actions.PredicateOnlyIfLabelExists,
-		})
-	}
-
-	if *lgtm {
-		allActions = append(allActions, actions.Action{
-			Comment:   "/lgtm",
-			Label:     "lgtm",
-			Predicate: actions.PredicateSkipIfLabelExists,
-		})
-	}
-
-	if *approve {
-		allActions = append(allActions, actions.Action{
-			Comment:   "/approve",
-			Label:     "approved",
-			Predicate: actions.PredicateSkipIfLabelExists,
-		})
+	for flag, flagPtr := range actionFlags {
+		if *flagPtr {
+			actionDef, exists := actionRegistry.GetAction(flag)
+			if exists {
+				allActions = append(allActions, actionDef.ToAction())
+			}
+		}
 	}
 
 	return &Config{
@@ -267,7 +253,7 @@ func fetchAllRepositoryPRs(repositories []string, filter github.Filter) ([]Repos
 }
 
 // printGroupedFlags prints command line flags organized into logical groups.
-func printGroupedFlags() {
+func printGroupedFlags(actionRegistry *actions.Registry) {
 	fmt.Fprintf(os.Stderr, "Repository:\n")
 	fmt.Fprintf(os.Stderr, "  -r, --repo string               GitHub repo (owner/repo)\n\n")
 
@@ -282,10 +268,24 @@ func printGroupedFlags() {
 	fmt.Fprintf(os.Stderr, "      --needs-ok-to-test          Include only PRs that have the 'needs-ok-to-test' label\n\n")
 
 	fmt.Fprintf(os.Stderr, "Actions:\n")
-	fmt.Fprintf(os.Stderr, "      --approve                   Generate /approve commands for PRs without 'approved' label\n")
-	fmt.Fprintf(os.Stderr, "      --lgtm                      Generate /lgtm commands for PRs without 'lgtm' label\n")
-	fmt.Fprintf(os.Stderr, "      --ok-to-test                Generate /ok-to-test commands for PRs with needs-ok-to-test label\n")
-	fmt.Fprintf(os.Stderr, "  -c, --comment strings           Generate comment commands\n")
+	builtinFlags := actionRegistry.GetFlagsBySource("embedded")
+	for _, flag := range builtinFlags {
+		action, _ := actionRegistry.GetAction(flag)
+		fmt.Fprintf(os.Stderr, "      --%-25s %s\n", flag, action.Description)
+	}
+
+	userFlags := actionRegistry.GetFlagsBySource("user")
+	if len(userFlags) > 0 {
+		homeDir, _ := os.UserHomeDir()
+		actionsPath := filepath.Join(homeDir, ".config", "autoprat", "actions")
+		fmt.Fprintf(os.Stderr, "\n  User-defined actions (from %s):\n", actionsPath)
+		for _, flag := range userFlags {
+			action, _ := actionRegistry.GetAction(flag)
+			fmt.Fprintf(os.Stderr, "      --%-25s %s\n", flag, action.Description)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "\n  -c, --comment strings           Generate comment commands\n")
 	fmt.Fprintf(os.Stderr, "      --throttle duration         Throttle identical comments to limit posting frequency\n\n")
 
 	fmt.Fprintf(os.Stderr, "Output:\n")
@@ -417,8 +417,8 @@ func outputResults(allRepositoryPRs []RepositoryPRs, config *Config, shouldPrint
 }
 
 var (
+	// Static flags that don't come from action registry
 	repo            = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
-	approve         = pflag.Bool("approve", false, "Generate /approve commands for PRs without 'approved' label")
 	author          = pflag.StringP("author", "a", "", "Filter by author (exact match)")
 	authorSubstring = pflag.StringP("author-substring", "A", "", "Filter by author containing text")
 	comment         = pflag.StringSliceP("comment", "c", nil, "Generate comment commands")
@@ -427,8 +427,6 @@ var (
 	failingCI       = pflag.BoolP("failing-ci", "f", false, "Only show PRs with failing CI")
 	failingCheck    = pflag.StringSlice("failing-check", nil, "Only show PRs where specific CI check is failing (exact match, e.g. 'ci/prow/test-fmt')")
 	label           = pflag.StringSliceP("label", "l", nil, "Filter by label (prefix with ! to negate)")
-	lgtm            = pflag.Bool("lgtm", false, "Generate /lgtm commands for PRs without 'lgtm' label")
-	okToTest        = pflag.Bool("ok-to-test", false, "Generate /ok-to-test commands for PRs with needs-ok-to-test label")
 	quiet           = pflag.BoolP("quiet", "q", false, "Print PR numbers only")
 	verbose         = pflag.BoolP("verbose", "v", false, "Print PR status only")
 	verboseVerbose  = pflag.BoolP("verbose-verbose", "V", false, "Print PR status with error logs from failing checks")
@@ -439,6 +437,16 @@ var (
 )
 
 func main() {
+	actionRegistry, err := actions.NewRegistry()
+	if err != nil {
+		log.Fatalf("Failed to load action registry: %v", err)
+	}
+
+	actionFlags := make(map[string]*bool)
+	for flag, action := range actionRegistry.GetAllActions() {
+		actionFlags[flag] = pflag.Bool(flag, false, action.Description)
+	}
+
 	pflag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] [PR-NUMBER|PR-URL ...]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `List and filter open GitHub pull requests.
@@ -456,7 +464,7 @@ automatically and --repo is not required.
 
 `)
 
-		printGroupedFlags()
+		printGroupedFlags(actionRegistry)
 
 		fmt.Fprintf(os.Stderr, `
 Examples:
@@ -489,19 +497,21 @@ Examples:
 		os.Exit(0)
 	}
 
-	config, err := parseAndValidateArgs()
+	config, err := parseAndValidateArgs(actionRegistry, actionFlags)
 	if err != nil {
 		pflag.Usage()
 		fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Print gh commands when action flags are used.
-	shouldPrintCommands := (*approve || *lgtm || *okToTest || len(*comment) > 0)
-
-	if *okToTest && !*needsOkToTest {
-		fmt.Fprintf(os.Stderr, "Hint: --ok-to-test is an action, not a filter. Use --needs-ok-to-test to filter eligible PRs.\n")
+	shouldPrintCommands := false
+	for _, flagPtr := range actionFlags {
+		if *flagPtr {
+			shouldPrintCommands = true
+			break
+		}
 	}
+	shouldPrintCommands = shouldPrintCommands || len(*comment) > 0
 
 	allRepositoryPRs, err := fetchAllRepositoryPRs(config.Repositories, config.Filter)
 	if err != nil {

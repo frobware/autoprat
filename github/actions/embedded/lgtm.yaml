@@ -1,0 +1,6 @@
+name: lgtm
+flag: lgtm
+description: "Generate /lgtm commands for PRs without 'lgtm' label"
+comment: "/lgtm"
+label: "lgtm"
+predicate: "skip_if_label_exists"
