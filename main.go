@@ -448,16 +448,36 @@ func main() {
 Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
 /ok-to-test, and custom comments.
 
-PR arguments can be either numbers (e.g. "123") or GitHub URLs
-(e.g. "https://github.com/owner/repo/pull/123").
+By default, lists all open PRs when --repo is specified alone.
+Optionally focus on specific PRs by providing:
+  - PR numbers (e.g. "123", requires --repo)
+  - GitHub URLs (e.g. "https://github.com/owner/repo/pull/123")
 
-The --repo flag is required when using numeric PR arguments or when
-not providing any PR arguments. When using GitHub URLs, the repository
-is extracted from the URL automatically.
+When using GitHub URLs, the repository is extracted from the URL
+automatically and --repo is not required.
 
 `)
 
 		printGroupedFlags()
+
+		fmt.Fprintf(os.Stderr, `
+Examples:
+  # List all open PRs in a repository.
+  %[1]s -r owner/repo
+
+  # Filter PRs that need approval.
+  %[1]s -r owner/repo --needs-approve
+
+  # Generate approval commands for Dependabot PRs.
+  %[1]s -r owner/repo --author dependabot --approve --print
+
+  # Execute the generated commands.
+  %[1]s -r owner/repo --author dependabot --approve --print | sh
+
+  # Focus on specific PRs.
+  %[1]s -r owner/repo --verbose 123 456
+  %[1]s --verbose https://github.com/owner/repo/pull/123
+`, os.Args[0])
 	}
 
 	pflag.Parse()
