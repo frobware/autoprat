@@ -1,0 +1,60 @@
+Usage: ./autoprat [flags] [PR-NUMBER|PR-URL ...]
+
+List and filter open GitHub pull requests.
+
+Filter PRs and generate gh(1) commands to apply /lgtm, /approve,
+/ok-to-test, and custom comments.
+
+By default, lists all open PRs when --repo is specified alone.
+Optionally focus on specific PRs by providing:
+  - PR numbers (e.g. "123", requires --repo)
+  - GitHub URLs (e.g. "https://github.com/owner/repo/pull/123")
+
+When using GitHub URLs, the repository is extracted from the URL
+automatically and --repo is not required.
+
+Repository:
+  -r, --repo string       GitHub repo (owner/repo)
+
+Filters:
+  -a, --author string     Filter by exact author name
+  --failing-check string  Filter by specific failing CI check name
+  --failing-ci            PRs with failing CI checks
+  -l, --label strings     Filter by labels (prefix with - to negate)
+  --needs-approve         PRs missing approval
+  --needs-lgtm            PRs missing LGTM
+  --needs-ok-to-test      PRs needing testing permission
+
+Actions:
+  --approve               Generate /approve commands for PRs without 'approved' label
+  -c, --comment strings   Generate comment commands
+  --lgtm                  Generate /lgtm commands for PRs without 'lgtm' label
+  --ok-to-test            Generate /ok-to-test commands for PRs with needs-ok-to-test label
+  --throttle duration     Throttle identical comments to limit posting frequency
+
+Output:
+  -v, --verbose           Print PR status only
+  -V, --verbose-verbose   Print PR status with error logs from failing checks
+  -q, --quiet             Print PR numbers only
+
+Utility:
+  --debug                 Enable debug logging
+  --version               Show version information
+
+
+Examples:
+  # List all open PRs in a repository.
+  ./autoprat -r owner/repo
+
+  # Filter PRs that need approval.
+  ./autoprat -r owner/repo --needs-approve
+
+  # Generate approval commands for Dependabot PRs.
+  ./autoprat -r owner/repo --author dependabot --approve
+
+  # Execute the generated commands.
+  ./autoprat -r owner/repo --author dependabot --approve | sh
+
+  # Focus on specific PRs.
+  ./autoprat -r owner/repo --verbose 123 456
+  ./autoprat --verbose https://github.com/owner/repo/pull/123

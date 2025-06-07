@@ -6,17 +6,17 @@ import (
 	"github.com/frobware/autoprat/github"
 )
 
-func TestParsePRArgument(t *testing.T) {
+func TestParsePullRequestRef(t *testing.T) {
 	tests := []struct {
 		name     string
 		arg      string
-		expected PRArgument
+		expected PullRequestRef
 		wantErr  bool
 	}{
 		{
 			name: "numeric PR number",
 			arg:  "123",
-			expected: PRArgument{
+			expected: PullRequestRef{
 				Number: 123,
 				Repo:   "",
 			},
@@ -25,7 +25,7 @@ func TestParsePRArgument(t *testing.T) {
 		{
 			name: "GitHub PR URL",
 			arg:  "https://github.com/owner/repo/pull/456",
-			expected: PRArgument{
+			expected: PullRequestRef{
 				Number: 456,
 				Repo:   "owner/repo",
 			},
@@ -34,7 +34,7 @@ func TestParsePRArgument(t *testing.T) {
 		{
 			name: "GitHub PR URL with trailing slash",
 			arg:  "https://github.com/owner/repo/pull/789/",
-			expected: PRArgument{
+			expected: PullRequestRef{
 				Number: 789,
 				Repo:   "owner/repo",
 			},
@@ -43,7 +43,7 @@ func TestParsePRArgument(t *testing.T) {
 		{
 			name: "GitHub PR URL with complex repo name",
 			arg:  "https://github.com/org-name/repo.name/pull/101",
-			expected: PRArgument{
+			expected: PullRequestRef{
 				Number: 101,
 				Repo:   "org-name/repo.name",
 			},
@@ -77,7 +77,7 @@ func TestParsePRArgument(t *testing.T) {
 		{
 			name: "GitLab URL with correct path structure",
 			arg:  "https://gitlab.com/owner/repo/pull/123",
-			expected: PRArgument{
+			expected: PullRequestRef{
 				Number: 123,
 				Repo:   "owner/repo",
 			},
@@ -86,7 +86,7 @@ func TestParsePRArgument(t *testing.T) {
 		{
 			name: "zero PR number",
 			arg:  "0",
-			expected: PRArgument{
+			expected: PullRequestRef{
 				Number: 0,
 				Repo:   "",
 			},
@@ -95,7 +95,7 @@ func TestParsePRArgument(t *testing.T) {
 		{
 			name: "negative PR number",
 			arg:  "-123",
-			expected: PRArgument{
+			expected: PullRequestRef{
 				Number: -123,
 				Repo:   "",
 			},
@@ -170,7 +170,7 @@ func TestRepositoryPRs(t *testing.T) {
 func TestConfig(t *testing.T) {
 	config := Config{
 		Repositories: []string{"repo1", "repo2"},
-		ParsedPRs:    []PRArgument{{Number: 123, Repo: "test/repo"}},
+		ParsedPRs:    []PullRequestRef{{Number: 123, Repo: "test/repo"}},
 		SearchQuery:  "test query",
 	}
 
@@ -255,7 +255,7 @@ func TestYesNo(t *testing.T) {
 	}
 }
 
-func TestSummarizeCIStatus(t *testing.T) {
+func TestCIStatus(t *testing.T) {
 	tests := []struct {
 		name     string
 		checks   []github.StatusCheck
@@ -326,15 +326,23 @@ func TestSummarizeCIStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := summarizeCIStatus(tt.checks)
+			// Create a PullRequest with the checks to test the method
+			pr := github.PullRequest{
+				StatusCheckRollup: github.StatusCheckRollup{
+					Contexts: struct {
+						Nodes []github.StatusCheck `json:"nodes"`
+					}{Nodes: tt.checks},
+				},
+			}
+			result := pr.CIStatus()
 			if result != tt.expected {
-				t.Errorf("summarizeCIStatus() = %q, want %q", result, tt.expected)
+				t.Errorf("CIStatus() = %q, want %q", result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestGetLastCommentTime(t *testing.T) {
+func TestLastCommentTime(t *testing.T) {
 	tests := []struct {
 		name     string
 		pr       github.PullRequest
@@ -402,20 +410,20 @@ func TestGetLastCommentTime(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getLastCommentTime(tt.pr)
+			result := tt.pr.LastCommentTime()
 
 			if tt.expected == "never" {
 				if result != "never" {
-					t.Errorf("getLastCommentTime() = %q, want %q", result, "never")
+					t.Errorf("LastCommentTime() = %q, want %q", result, "never")
 				}
 			} else if tt.expected == "" {
 				// For valid timestamps, we just check it's not "never"
 				if result == "never" {
-					t.Errorf("getLastCommentTime() = 'never', expected a duration")
+					t.Errorf("LastCommentTime() = 'never', expected a duration")
 				}
 			} else {
 				if result != tt.expected {
-					t.Errorf("getLastCommentTime() = %q, want %q", result, tt.expected)
+					t.Errorf("LastCommentTime() = %q, want %q", result, tt.expected)
 				}
 			}
 		})
