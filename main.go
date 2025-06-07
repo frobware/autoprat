@@ -164,13 +164,13 @@ func outputResults(allRepositoryPRs []RepositoryPRs, config *Config, shouldPrint
 		return
 	}
 
-	if config.Verbose || config.VerboseVerbose {
+	if config.Detailed || config.DetailedWithLogs {
 		for _, repoPRs := range allRepositoryPRs {
 			if len(repoPRs.PRs) > 0 {
 				fmt.Printf("Repository: %s\n", repoPRs.Repository)
 				fmt.Println(strings.Repeat("=", len(repoPRs.Repository)+12))
 				for _, pr := range repoPRs.PRs {
-					printVerbosePR(pr, config.VerboseVerbose)
+					printDetailedPR(pr, config.DetailedWithLogs)
 					if config.Throttle > 0 {
 						pr.PrintThrottleDiagnostics(config.Actions, config.Throttle)
 					}
@@ -281,7 +281,7 @@ func main() {
 	outputResults(filteredPRs, config, shouldPrintCommands)
 }
 
-// Template data structure for verbose PR output.
+// Template data structure for detailed PR output.
 type TemplateData struct {
 	github.PullRequest
 	ShowLogs bool
@@ -378,7 +378,7 @@ var templateFuncs = template.FuncMap{
 	},
 }
 
-func printVerbosePR(prItem github.PullRequest, showLogs bool) {
+func printDetailedPR(prItem github.PullRequest, showLogs bool) {
 	tmpl, err := template.New("verbose").Funcs(templateFuncs).Parse(verboseTemplate)
 	if err != nil {
 		log.Printf("Template parse error: %v", err)

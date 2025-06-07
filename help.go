@@ -76,8 +76,8 @@ Examples:
   %s -r owner/repo --author dependabot --approve | sh
 
   # Focus on specific PRs.
-  %s -r owner/repo --verbose 123 456
-  %s --verbose https://github.com/owner/repo/pull/123`,
+  %s -r owner/repo --detailed 123 456
+  %s --detailed https://github.com/owner/repo/pull/123`,
 		programName, programName, programName,
 		programName, programName, programName))
 

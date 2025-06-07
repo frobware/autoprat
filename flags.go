@@ -70,8 +70,8 @@ func DefineAllFlags(actionRegistry *actions.Registry, templateRegistry *search.T
 		{
 			Name: "Output:",
 			Flags: []FlagInfo{
-				{Name: "verbose", ShortName: "v", Type: "bool", Description: "Print PR status only", Default: false},
-				{Name: "verbose-verbose", ShortName: "V", Type: "bool", Description: "Print PR status with error logs from failing checks", Default: false},
+				{Name: "detailed", ShortName: "d", Type: "bool", Description: "Show detailed PR information", Default: false},
+				{Name: "detailed-with-logs", ShortName: "D", Type: "bool", Description: "Show detailed PR information with error logs from failing checks", Default: false},
 				{Name: "quiet", ShortName: "q", Type: "bool", Description: "Print PR numbers only", Default: false},
 			},
 		},
@@ -281,11 +281,11 @@ type Config struct {
 	Filters      []filters.FilterDefinition
 	SearchQuery  string
 	// Runtime flags
-	Throttle       time.Duration
-	DebugMode      bool
-	Verbose        bool
-	VerboseVerbose bool
-	Quiet          bool
+	Throttle         time.Duration
+	DebugMode        bool
+	Detailed         bool
+	DetailedWithLogs bool
+	Quiet            bool
 }
 
 // parseAndValidateArgs parses command line arguments and validates
@@ -296,8 +296,8 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 	comment := flagRefs["comment"].(*[]string)
 	throttle := flagRefs["throttle"].(*time.Duration)
 	debugMode := flagRefs["debug"].(*bool)
-	verbose := flagRefs["verbose"].(*bool)
-	verboseVerbose := flagRefs["verbose-verbose"].(*bool)
+	detailed := flagRefs["detailed"].(*bool)
+	detailedWithLogs := flagRefs["detailed-with-logs"].(*bool)
 	quiet := flagRefs["quiet"].(*bool)
 	prNumbers := pflag.Args()
 
@@ -387,14 +387,14 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 	searchQuery := strings.Join(queryTerms, " ")
 
 	return &Config{
-		Repositories:   repoList,
-		ParsedPRs:      parsedPRs,
-		Actions:        allActions,
-		SearchQuery:    searchQuery,
-		Throttle:       *throttle,
-		DebugMode:      *debugMode,
-		Verbose:        *verbose,
-		VerboseVerbose: *verboseVerbose,
-		Quiet:          *quiet,
+		Repositories:     repoList,
+		ParsedPRs:        parsedPRs,
+		Actions:          allActions,
+		SearchQuery:      searchQuery,
+		Throttle:         *throttle,
+		DebugMode:        *debugMode,
+		Detailed:         *detailed,
+		DetailedWithLogs: *detailedWithLogs,
+		Quiet:            *quiet,
 	}, nil
 }

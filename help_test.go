@@ -100,11 +100,11 @@ func TestFlagDisplay(t *testing.T) {
 		{
 			name: "bool flag with short",
 			flag: FlagInfo{
-				Name:      "verbose",
-				ShortName: "v",
+				Name:      "detailed",
+				ShortName: "d",
 				Type:      "bool",
 			},
-			expected: "-v, --verbose",
+			expected: "-d, --detailed",
 		},
 		{
 			name: "string flag with short",
