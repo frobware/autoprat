@@ -1,0 +1,6 @@
+name: "Author Filter"
+flag: "author"
+flag_short: "a"
+description: "Filter by exact author name"
+parameterized: true
+query_template: "author:{value}"

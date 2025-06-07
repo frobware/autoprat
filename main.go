@@ -38,6 +38,7 @@ import (
 	"github.com/frobware/autoprat/github"
 	"github.com/frobware/autoprat/github/actions"
 	"github.com/frobware/autoprat/github/filters"
+	"github.com/frobware/autoprat/github/search"
 	"github.com/spf13/pflag"
 )
 
@@ -113,14 +114,14 @@ type RepositoryPRs struct {
 type Config struct {
 	Repositories []string
 	ParsedPRs    []PRArgument
-	Filter       github.Filter
 	Actions      []actions.Action
 	Filters      []filters.FilterDefinition
+	SearchQuery  string
 }
 
 // parseAndValidateArgs parses command line arguments and validates
 // repository requirements.
-func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[string]*bool, filterRegistry *filters.Registry, filterFlags map[string]*bool) (*Config, error) {
+func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[string]*bool, templateRegistry *search.TemplateRegistry, templateFlags map[string]*bool, parameterizedTemplateFlags map[string]interface{}) (*Config, error) {
 	prNumbers := pflag.Args()
 
 	var parsedPRs []PRArgument
@@ -155,20 +156,6 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 	}
 	sort.Strings(repoList)
 
-	var labels []github.LabelFilter
-	for _, rawLabel := range *label {
-		negate := false
-		labelName := rawLabel
-		if strings.HasPrefix(rawLabel, "!") {
-			negate = true
-			labelName = strings.TrimPrefix(rawLabel, "!")
-		}
-		labels = append(labels, github.LabelFilter{
-			Name:   labelName,
-			Negate: negate,
-		})
-	}
-
 	var allActions []actions.Action
 	for _, c := range *comment {
 		allActions = append(allActions, actions.Action{
@@ -186,34 +173,52 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 		}
 	}
 
-	var allFilters []filters.FilterDefinition
-	for flag, flagPtr := range filterFlags {
+	// Build search query from templates
+	var queryTerms []string
+
+	// Handle boolean templates (non-parameterized)
+	for flag, flagPtr := range templateFlags {
 		if *flagPtr {
-			filterDef, exists := filterRegistry.GetFilter(flag)
-			if exists {
-				allFilters = append(allFilters, filterDef)
+			template, exists := templateRegistry.GetTemplate(flag)
+			if exists && !template.Parameterized {
+				queryTerms = append(queryTerms, template.Query)
 			}
 		}
 	}
 
-	filter := github.Filter{
-		Labels:          labels,
-		Author:          *author,
-		AuthorSubstring: *authorSubstring,
-		FailingChecks:   *failingCheck,
+	// Handle parameterized templates
+	for flag, flagPtr := range parameterizedTemplateFlags {
+		_, exists := templateRegistry.GetTemplate(flag)
+		if !exists {
+			continue
+		}
+
+		var query string
+		var queryErr error
+
+		if stringPtr, ok := flagPtr.(*string); ok && *stringPtr != "" {
+			query, queryErr = templateRegistry.BuildQuery(flag, *stringPtr, nil)
+		} else if slicePtr, ok := flagPtr.(*[]string); ok && len(*slicePtr) > 0 {
+			query, queryErr = templateRegistry.BuildQuery(flag, "", *slicePtr)
+		}
+
+		if queryErr == nil && query != "" {
+			queryTerms = append(queryTerms, query)
+		}
 	}
+
+	searchQuery := strings.Join(queryTerms, " ")
 
 	return &Config{
 		Repositories: repoList,
 		ParsedPRs:    parsedPRs,
-		Filter:       filter,
 		Actions:      allActions,
-		Filters:      allFilters,
+		SearchQuery:  searchQuery,
 	}, nil
 }
 
-// fetchAllRepositoryPRs fetches PRs from all repositories in parallel.
-func fetchAllRepositoryPRs(repositories []string, filter github.Filter) ([]RepositoryPRs, error) {
+// fetchAllRepositoryPRsWithSearch fetches PRs from all repositories using the search API.
+func fetchAllRepositoryPRsWithSearch(repositories []string, searchQuery string) ([]RepositoryPRs, error) {
 	var allRepositoryPRs []RepositoryPRs
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -230,9 +235,9 @@ func fetchAllRepositoryPRs(repositories []string, filter github.Filter) ([]Repos
 				return
 			}
 
-			prs, err := client.List(filter)
+			prs, err := client.Search(searchQuery)
 			if err != nil {
-				errChan <- fmt.Errorf("failed to list PRs for %s: %v", repo, err)
+				errChan <- fmt.Errorf("failed to search PRs for %s: %v", repo, err)
 				return
 			}
 
@@ -260,40 +265,56 @@ func fetchAllRepositoryPRs(repositories []string, filter github.Filter) ([]Repos
 }
 
 // printGroupedFlags prints command line flags organized into logical groups.
-func printGroupedFlags(actionRegistry *actions.Registry, filterRegistry *filters.Registry) {
+func printGroupedFlags(actionRegistry *actions.Registry, templateRegistry *search.TemplateRegistry) {
 	fmt.Fprintf(os.Stderr, "Repository:\n")
 	fmt.Fprintf(os.Stderr, "  -r, --repo string               GitHub repo (owner/repo)\n\n")
 
 	fmt.Fprintf(os.Stderr, "Filters:\n")
-	fmt.Fprintf(os.Stderr, "  -a, --author string             Filter by author (exact match)\n")
-	fmt.Fprintf(os.Stderr, "  -A, --author-substring string   Filter by author containing text\n")
-	fmt.Fprintf(os.Stderr, "  -l, --label strings             Filter by label (prefix with ! to negate)\n")
-	fmt.Fprintf(os.Stderr, "      --failing-check strings     Only show PRs where specific CI check is failing (exact match)\n")
 
-	// Show built-in filters
-	builtinFilterFlags := filterRegistry.GetFlagsBySource("embedded")
-	for _, flag := range builtinFilterFlags {
-		filter, _ := filterRegistry.GetFilter(flag)
+	// Show built-in templates
+	builtinTemplateFlags := templateRegistry.GetFlagsBySource("embedded")
+	for _, flag := range builtinTemplateFlags {
+		template, _ := templateRegistry.GetTemplate(flag)
 		flagDisplay := fmt.Sprintf("--%s", flag)
-		if filter.FlagShort != "" {
-			flagDisplay = fmt.Sprintf("-%s, --%s", filter.FlagShort, flag)
+		if template.FlagShort != "" {
+			flagDisplay = fmt.Sprintf("-%s, --%s", template.FlagShort, flag)
 		}
-		fmt.Fprintf(os.Stderr, "  %-31s %s\n", flagDisplay, filter.Description)
+
+		// Add parameter type for parameterized templates
+		if template.Parameterized {
+			if template.SupportsMultiple {
+				flagDisplay += " strings"
+			} else {
+				flagDisplay += " string"
+			}
+		}
+
+		fmt.Fprintf(os.Stderr, "  %-31s %s\n", flagDisplay, template.Description)
 	}
 
-	// Show user-defined filters if any exist
-	userFilterFlags := filterRegistry.GetFlagsBySource("user")
-	if len(userFilterFlags) > 0 {
+	// Show user-defined templates if any exist
+	userTemplateFlags := templateRegistry.GetFlagsBySource("user")
+	if len(userTemplateFlags) > 0 {
 		homeDir, _ := os.UserHomeDir()
-		filtersPath := filepath.Join(homeDir, ".config", "autoprat", "filters")
-		fmt.Fprintf(os.Stderr, "\n  User-defined filters (from %s):\n", filtersPath)
-		for _, flag := range userFilterFlags {
-			filter, _ := filterRegistry.GetFilter(flag)
+		templatesPath := filepath.Join(homeDir, ".config", "autoprat", "templates")
+		fmt.Fprintf(os.Stderr, "\n  User-defined filters (from %s):\n", templatesPath)
+		for _, flag := range userTemplateFlags {
+			template, _ := templateRegistry.GetTemplate(flag)
 			flagDisplay := fmt.Sprintf("--%s", flag)
-			if filter.FlagShort != "" {
-				flagDisplay = fmt.Sprintf("-%s, --%s", filter.FlagShort, flag)
+			if template.FlagShort != "" {
+				flagDisplay = fmt.Sprintf("-%s, --%s", template.FlagShort, flag)
 			}
-			fmt.Fprintf(os.Stderr, "  %-31s %s\n", flagDisplay, filter.Description)
+
+			// Add parameter type for parameterized templates
+			if template.Parameterized {
+				if template.SupportsMultiple {
+					flagDisplay += " strings"
+				} else {
+					flagDisplay += " string"
+				}
+			}
+
+			fmt.Fprintf(os.Stderr, "  %-31s %s\n", flagDisplay, template.Description)
 		}
 	}
 
@@ -330,14 +351,10 @@ func printGroupedFlags(actionRegistry *actions.Registry, filterRegistry *filters
 	fmt.Fprintf(os.Stderr, "      --version                   Show version information\n")
 }
 
-// applyFilters applies global filters and PR-specific filtering to all repositories.
-func applyFilters(allRepositoryPRs []RepositoryPRs, config *Config) []RepositoryPRs {
+// applyPRFiltering applies PR-specific filtering when specific PRs are requested.
+func applyPRFiltering(allRepositoryPRs []RepositoryPRs, config *Config) []RepositoryPRs {
 	for i := range allRepositoryPRs {
 		prs := allRepositoryPRs[i].PRs
-
-		for _, filter := range config.Filters {
-			prs = filter.Apply(prs)
-		}
 
 		if len(config.ParsedPRs) > 0 {
 			selected := make(map[int]struct{})
@@ -348,7 +365,7 @@ func applyFilters(allRepositoryPRs []RepositoryPRs, config *Config) []Repository
 			}
 
 			if len(selected) > 0 {
-				filtered := prs[:0]
+				var filtered []github.PullRequest
 				for _, pr := range prs {
 					if _, ok := selected[pr.Number]; ok {
 						filtered = append(filtered, pr)
@@ -443,19 +460,15 @@ func outputResults(allRepositoryPRs []RepositoryPRs, config *Config, shouldPrint
 }
 
 var (
-	// Static flags that don't come from action registry
-	repo            = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
-	author          = pflag.StringP("author", "a", "", "Filter by author (exact match)")
-	authorSubstring = pflag.StringP("author-substring", "A", "", "Filter by author containing text")
-	comment         = pflag.StringSliceP("comment", "c", nil, "Generate comment commands")
-	throttle        = pflag.Duration("throttle", 0, "Throttle identical comments to limit posting frequency (e.g. 5m, 1h)")
-	debugMode       = pflag.Bool("debug", false, "Enable debug logging")
-	failingCheck    = pflag.StringSlice("failing-check", nil, "Only show PRs where specific CI check is failing (exact match, e.g. 'ci/prow/test-fmt')")
-	label           = pflag.StringSliceP("label", "l", nil, "Filter by label (prefix with ! to negate)")
-	quiet           = pflag.BoolP("quiet", "q", false, "Print PR numbers only")
-	verbose         = pflag.BoolP("verbose", "v", false, "Print PR status only")
-	verboseVerbose  = pflag.BoolP("verbose-verbose", "V", false, "Print PR status with error logs from failing checks")
-	showVersion     = pflag.Bool("version", false, "Show version information")
+	// Static flags that don't come from registries
+	repo           = pflag.StringP("repo", "r", "", "GitHub repo (owner/repo)")
+	comment        = pflag.StringSliceP("comment", "c", nil, "Generate comment commands")
+	throttle       = pflag.Duration("throttle", 0, "Throttle identical comments to limit posting frequency (e.g. 5m, 1h)")
+	debugMode      = pflag.Bool("debug", false, "Enable debug logging")
+	quiet          = pflag.BoolP("quiet", "q", false, "Print PR numbers only")
+	verbose        = pflag.BoolP("verbose", "v", false, "Print PR status only")
+	verboseVerbose = pflag.BoolP("verbose-verbose", "V", false, "Print PR status with error logs from failing checks")
+	showVersion    = pflag.Bool("version", false, "Show version information")
 )
 
 func main() {
@@ -464,9 +477,9 @@ func main() {
 		log.Fatalf("Failed to load action registry: %v", err)
 	}
 
-	filterRegistry, err := filters.NewRegistry()
+	templateRegistry, err := search.NewTemplateRegistry()
 	if err != nil {
-		log.Fatalf("Failed to load filter registry: %v", err)
+		log.Fatalf("Failed to load template registry: %v", err)
 	}
 
 	actionFlags := make(map[string]*bool)
@@ -474,12 +487,32 @@ func main() {
 		actionFlags[flag] = pflag.Bool(flag, false, action.Description)
 	}
 
-	filterFlags := make(map[string]*bool)
-	for flag, filter := range filterRegistry.GetAllFilters() {
-		if filter.FlagShort != "" {
-			filterFlags[flag] = pflag.BoolP(flag, filter.FlagShort, false, filter.Description)
+	templateFlags := make(map[string]*bool)
+	parameterizedTemplateFlags := make(map[string]interface{})
+
+	for flag, template := range templateRegistry.GetAllTemplates() {
+		if template.Parameterized {
+			// Register parameterized templates
+			if template.SupportsMultiple {
+				if template.FlagShort != "" {
+					parameterizedTemplateFlags[flag] = pflag.StringSliceP(flag, template.FlagShort, nil, template.Description)
+				} else {
+					parameterizedTemplateFlags[flag] = pflag.StringSlice(flag, nil, template.Description)
+				}
+			} else {
+				if template.FlagShort != "" {
+					parameterizedTemplateFlags[flag] = pflag.StringP(flag, template.FlagShort, "", template.Description)
+				} else {
+					parameterizedTemplateFlags[flag] = pflag.String(flag, "", template.Description)
+				}
+			}
 		} else {
-			filterFlags[flag] = pflag.Bool(flag, false, filter.Description)
+			// Register boolean templates
+			if template.FlagShort != "" {
+				templateFlags[flag] = pflag.BoolP(flag, template.FlagShort, false, template.Description)
+			} else {
+				templateFlags[flag] = pflag.Bool(flag, false, template.Description)
+			}
 		}
 	}
 
@@ -500,7 +533,7 @@ automatically and --repo is not required.
 
 `)
 
-		printGroupedFlags(actionRegistry, filterRegistry)
+		printGroupedFlags(actionRegistry, templateRegistry)
 
 		fmt.Fprintf(os.Stderr, `
 Examples:
@@ -533,7 +566,7 @@ Examples:
 		os.Exit(0)
 	}
 
-	config, err := parseAndValidateArgs(actionRegistry, actionFlags, filterRegistry, filterFlags)
+	config, err := parseAndValidateArgs(actionRegistry, actionFlags, templateRegistry, templateFlags, parameterizedTemplateFlags)
 	if err != nil {
 		pflag.Usage()
 		fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
@@ -549,12 +582,14 @@ Examples:
 	}
 	shouldPrintCommands = shouldPrintCommands || len(*comment) > 0
 
-	allRepositoryPRs, err := fetchAllRepositoryPRs(config.Repositories, config.Filter)
+	// Always use search API
+	allRepositoryPRs, err := fetchAllRepositoryPRsWithSearch(config.Repositories, config.SearchQuery)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
 
-	filteredPRs := applyFilters(allRepositoryPRs, config)
+	// Apply PR-specific filtering (when specific PRs are requested)
+	filteredPRs := applyPRFiltering(allRepositoryPRs, config)
 
 	outputResults(filteredPRs, config, shouldPrintCommands)
 }

@@ -38,16 +38,3 @@ type Comment struct {
 		Login string `json:"login"`
 	} `json:"author"`
 }
-
-type LabelFilter struct {
-	Name   string
-	Negate bool
-}
-
-// Filter expresses optional match criteria for PR selection.
-type Filter struct {
-	Author          string
-	AuthorSubstring string
-	Labels          []LabelFilter
-	FailingChecks   []string
-}

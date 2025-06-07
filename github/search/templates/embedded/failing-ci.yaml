@@ -1,0 +1,4 @@
+name: "Failing CI"
+flag: "failing-ci"
+description: "PRs with failing CI checks"
+query: "status:failure"

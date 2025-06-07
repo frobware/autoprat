@@ -1,0 +1,4 @@
+name: "Needs Approval"
+flag: "needs-approve"
+description: "PRs missing approval"
+query: "-label:approved"

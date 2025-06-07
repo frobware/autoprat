@@ -1,9 +1,12 @@
 package github
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/frobware/autoprat/github/search"
 )
 
 type Client struct {
@@ -14,79 +17,39 @@ func NewClient(repo string) (*Client, error) {
 	return &Client{repo: repo}, nil
 }
 
-func (c *Client) List(filter Filter) ([]PullRequest, error) {
-	prs, err := fetchPullRequests(c.repo, false)
+func (c *Client) Search(query string) ([]PullRequest, error) {
+	// Build the complete search query including repository and type
+	parts := strings.Split(c.repo, "/")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid repository format: %s", c.repo)
+	}
+
+	qb := search.NewQueryBuilder().
+		Repo(parts[0], parts[1]).
+		Type("pr").
+		State("open")
+
+	if query != "" {
+		qb.AddTerm(query)
+	}
+
+	finalQuery := qb.Build()
+
+	prs, err := searchPullRequests(finalQuery)
 	if err != nil {
 		return nil, err
 	}
 
-	filtered := make([]PullRequest, 0, len(prs))
-
-	for _, pr := range prs {
-		if matchesFilter(pr, filter) {
-			filtered = append(filtered, pr)
-		}
-	}
-
-	sortPRsDescending(filtered)
-
-	return filtered, nil
+	sortPRsDescending(prs)
+	return prs, nil
 }
 
-func matchesFilter(pr PullRequest, filter Filter) bool {
-	// Author exact match
-	if filter.Author != "" && pr.AuthorLogin != filter.Author {
-		return false
-	}
-
-	// Author substring match
-	if filter.AuthorSubstring != "" && !strings.Contains(pr.AuthorLogin, filter.AuthorSubstring) {
-		return false
-	}
-
-	// Label filters
-	for _, labelFilter := range filter.Labels {
-		hasLabel := slices.Contains(pr.Labels, labelFilter.Name)
-		if labelFilter.Negate && hasLabel {
-			// Should NOT have the label but does.
-			return false
-		}
-		if !labelFilter.Negate && !hasLabel {
-			// Should have the label but doesn't.
-			return false
-		}
-	}
-
-	if len(filter.FailingChecks) > 0 && !hasFailingChecks(pr, filter.FailingChecks) {
-		return false
-	}
-
-	return true
-}
-
+// hasFailingCI returns true if any CI check is failing.
+// Kept for potential future use.
 func hasFailingCI(pr PullRequest) bool {
 	for _, check := range pr.StatusCheckRollup.Contexts.Nodes {
 		if check.State == "FAILURE" || check.Conclusion == "FAILURE" {
 			return true
-		}
-	}
-	return false
-}
-
-func hasFailingChecks(pr PullRequest, checkNames []string) bool {
-	for _, targetCheck := range checkNames {
-		for _, check := range pr.StatusCheckRollup.Contexts.Nodes {
-			checkName := check.Name
-			if checkName == "" {
-				checkName = check.Context
-			}
-
-			// Exact match only for safety.
-			if checkName == targetCheck {
-				if check.State == "FAILURE" || check.Conclusion == "FAILURE" {
-					return true
-				}
-			}
 		}
 	}
 	return false
