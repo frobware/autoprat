@@ -19,6 +19,20 @@ clean:
 test:
 	go test -v ./...
 
+# Run tests with coverage summary per package.
+.PHONY: test-coverage
+test-coverage:
+	@echo "Running tests with coverage..."
+	@go test -cover ./...
+
+# Run tests with detailed coverage report (file-level).
+.PHONY: test-coverage-detailed
+test-coverage-detailed:
+	@echo "Generating detailed coverage report..."
+	@go test -coverprofile=coverage.out ./...
+	@go tool cover -func=coverage.out
+	@rm -f coverage.out
+
 # Format code.
 .PHONY: fmt
 fmt:
@@ -108,6 +122,8 @@ help:
 	@echo "  mod-tidy        - Run go mod tidy"
 	@echo "  mod-tidy-check  - Check if go.mod/go.sum need tidying (CI)"
 	@echo "  test            - Run tests"
+	@echo "  test-coverage   - Run tests with coverage summary per package"
+	@echo "  test-coverage-detailed - Run tests with detailed coverage report"
 	@echo "  update-all-deps - Update all dependencies (direct and indirect)"
 	@echo "  update-deps     - Update direct dependencies to latest versions"
 	@echo "  version         - Show version that would be built"

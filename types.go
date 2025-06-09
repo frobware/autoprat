@@ -1,12 +1,16 @@
-package github
+package main
 
 import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/frobware/autoprat/github/actions"
 )
+
+// PullRequestRef represents a reference to a pull request.
+type PullRequestRef struct {
+	Number int
+	Repo   string // Empty for numeric arguments, populated for URLs.
+}
 
 // PullRequest represents a minimal view of a GitHub PR for filtering,
 // listing, and acting on.
@@ -128,8 +132,8 @@ func (pr PullRequest) SearchAuthorName() string {
 }
 
 // PrintThrottleDiagnostics shows what the throttling logic would do for debugging.
-func (pr PullRequest) PrintThrottleDiagnostics(allActions []actions.Action, throttle time.Duration) {
-	toPost := actions.FilterActions(allActions, pr.Labels)
+func (pr PullRequest) PrintThrottleDiagnostics(allActions []Action, throttle time.Duration) {
+	toPost := FilterActions(allActions, pr.Labels)
 	if len(toPost) == 0 {
 		return
 	}

@@ -1,12 +1,11 @@
-package github
+package main
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/frobware/autoprat/github/search"
 )
 
 type Client struct {
@@ -17,14 +16,14 @@ func NewClient(repo string) (*Client, error) {
 	return &Client{repo: repo}, nil
 }
 
-func (c *Client) Search(query string) ([]PullRequest, error) {
+func (c *Client) Search(ctx context.Context, query string) ([]PullRequest, error) {
 	// Build the complete search query including repository and type
 	parts := strings.Split(c.repo, "/")
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid repository format: %s", c.repo)
 	}
 
-	qb := search.NewQueryBuilder().
+	qb := NewQueryBuilder().
 		Repo(parts[0], parts[1]).
 		Type("pr").
 		State("open")
@@ -35,7 +34,7 @@ func (c *Client) Search(query string) ([]PullRequest, error) {
 
 	finalQuery := qb.Build()
 
-	prs, err := searchPullRequests(finalQuery)
+	prs, err := searchPullRequests(ctx, finalQuery)
 	if err != nil {
 		return nil, err
 	}

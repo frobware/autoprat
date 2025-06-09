@@ -1,6 +1,7 @@
-package github
+package main
 
 import (
+	"context"
 	"strings"
 
 	_ "embed"
@@ -8,7 +9,7 @@ import (
 	"github.com/cli/go-gh"
 )
 
-//go:embed queries/search-prs.graphql
+//go:embed github/queries/search-prs.graphql
 var searchPRQuery string
 
 // graphQLPullRequest matches the GraphQL query response structure.
@@ -40,7 +41,7 @@ type labels struct {
 	} `json:"nodes"`
 }
 
-func searchPullRequests(query string) ([]PullRequest, error) {
+func searchPullRequests(ctx context.Context, query string) ([]PullRequest, error) {
 	client, err := gh.GQLClient(nil)
 	if err != nil {
 		return nil, err

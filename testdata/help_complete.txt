@@ -30,6 +30,7 @@ Actions:
   -c, --comment strings     Generate comment commands
   --lgtm                    Generate /lgtm commands for PRs without 'lgtm' label
   --ok-to-test              Generate /ok-to-test commands for PRs with needs-ok-to-test label
+  --retest                  Generate /retest commands to restart failing CI
   --throttle duration       Throttle identical comments to limit posting frequency
 
 Output:
@@ -39,7 +40,7 @@ Output:
 
 Utility:
   --debug                   Enable debug logging
-  --version                 Show version information
+  -v, --version             Show version information
 
 
 Examples:

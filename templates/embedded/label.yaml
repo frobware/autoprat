@@ -1,0 +1,7 @@
+name: "Label Filter"
+flag: "label"
+flag_short: "l"
+description: "Filter by labels (prefix with - to negate)"
+parameterized: true
+supports_multiple: true
+query_template: "{labels}"

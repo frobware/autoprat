@@ -48,19 +48,24 @@ automatically and --repo is not required.
 		}
 	}
 
-	// Process all sections with consistent alignment
-	for _, category := range categories {
-		result.WriteString(fmt.Sprintf("%s\n", category.Name))
-		for _, flag := range category.Flags {
-			flagDisplay := flag.Display()
-			// Use consistent spacing based on maxWidth
-			padding := maxWidth - len(flagDisplay) + 2
-			result.WriteString(fmt.Sprintf("  %s%s%s\n", flagDisplay, strings.Repeat(" ", padding), flag.Description))
-		}
-		result.WriteString("\n") // Empty line between sections
+	// Ensure minimum width for readability
+	if maxWidth < 20 {
+		maxWidth = 20
 	}
 
-	// Write the footer (examples)
+	// Write each category
+	for _, category := range categories {
+		result.WriteString(fmt.Sprintf("%s\n", category.Name))
+
+		for _, flag := range category.Flags {
+			flagDisplay := flag.Display()
+			padding := strings.Repeat(" ", maxWidth-len(flagDisplay)+2)
+			result.WriteString(fmt.Sprintf("  %s%s%s\n", flagDisplay, padding, flag.Description))
+		}
+		result.WriteString("\n")
+	}
+
+	// Write examples section
 	result.WriteString(fmt.Sprintf(`
 Examples:
   # List all open PRs in a repository.

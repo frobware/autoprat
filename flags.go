@@ -2,24 +2,14 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
-	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
-
-	"github.com/frobware/autoprat/github/actions"
-	"github.com/frobware/autoprat/github/filters"
-	"github.com/frobware/autoprat/github/search"
 )
-
-// pullRequestRefRegex matches GitHub PR URLs like "/owner/repo/pull/123" or "/owner/repo/pull/123/".
-var pullRequestRefRegex = regexp.MustCompile(`^/([^/]+)/([^/]+)/pull/(\d+)/?$`)
 
 // FlagInfo contains information about a command-line flag.
 type FlagInfo struct {
@@ -59,7 +49,7 @@ type FlagCategory struct {
 }
 
 // DefineAllFlags creates all command-line flags and returns categorised flag information.
-func DefineAllFlags(actionRegistry *actions.Registry, templateRegistry *search.TemplateRegistry) []FlagCategory {
+func DefineAllFlags(availableActions map[string]ActionDefinition, availableTemplates map[string]QueryTemplate) []FlagCategory {
 	categories := []FlagCategory{
 		{
 			Name: "Repository:",
@@ -79,14 +69,14 @@ func DefineAllFlags(actionRegistry *actions.Registry, templateRegistry *search.T
 			Name: "Utility:",
 			Flags: []FlagInfo{
 				{Name: "debug", ShortName: "", Type: "bool", Description: "Enable debug logging", Default: false},
-				{Name: "version", ShortName: "", Type: "bool", Description: "Show version information", Default: false},
+				{Name: "version", ShortName: "v", Type: "bool", Description: "Show version information", Default: false},
 			},
 		},
 	}
 
-	// Add filters from template registry
+	// Add filters from available templates
 	var filterFlags []FlagInfo
-	for flag, template := range templateRegistry.GetAllTemplates() {
+	for flag, template := range availableTemplates {
 		flagType := "bool"
 		var defaultVal interface{} = false
 		if template.Parameterized {
@@ -131,8 +121,8 @@ func DefineAllFlags(actionRegistry *actions.Registry, templateRegistry *search.T
 		Default:     time.Duration(0),
 	})
 
-	// Add dynamic actions from registry
-	for flag, action := range actionRegistry.GetAllActions() {
+	// Add dynamic actions from available actions
+	for flag, action := range availableActions {
 		actionFlags = append(actionFlags, FlagInfo{
 			Name:        flag,
 			ShortName:   "",
@@ -190,9 +180,9 @@ func registerFlags(categories []FlagCategory) map[string]interface{} {
 }
 
 // SetupFlags initialises all flags and returns the categories and flag references.
-func SetupFlags(actionRegistry *actions.Registry, templateRegistry *search.TemplateRegistry) ([]FlagCategory, map[string]interface{}) {
+func SetupFlags(availableActions map[string]ActionDefinition, availableTemplates map[string]QueryTemplate) ([]FlagCategory, map[string]interface{}) {
 	// Define all flags and get their categories
-	flagCategories := DefineAllFlags(actionRegistry, templateRegistry)
+	flagCategories := DefineAllFlags(availableActions, availableTemplates)
 
 	// Register all flags and get references to them
 	flagRefs := registerFlags(flagCategories)
@@ -237,60 +227,46 @@ func BuildFlagMapsForParsing(flagCategories []FlagCategory, flagRefs map[string]
 	return actionFlags, templateFlags, parameterisedTemplateFlags
 }
 
-// PullRequestRef represents a parsed PR argument with number and optional repository.
-type PullRequestRef struct {
-	Number int
-	Repo   string // Empty for numeric arguments, populated for URLs.
-}
-
-// parsePRArgument extracts a PR number and repository from either a numeric string or GitHub URL.
-// For URLs, extracts both the repository and PR number.
-// For numeric arguments, only returns the PR number.
-// Supports formats:
-//   - "123" (numeric PR number)
-//   - "https://github.com/owner/repo/pull/123" (GitHub PR URL)
-func parsePRArgument(arg string) (PullRequestRef, error) {
-	if num, err := strconv.Atoi(arg); err == nil {
-		return PullRequestRef{Number: num}, nil
+// buildQuery builds a search query from a template with the given parameters.
+// This replicates the logic from search.TemplateRegistry.BuildQuery but works with plain data.
+func buildQuery(template QueryTemplate, value string, values []string) (string, error) {
+	// Non-parameterized templates
+	if !template.Parameterized {
+		return template.Query, nil
 	}
 
-	parsedURL, err := url.Parse(arg)
-	if err != nil {
-		return PullRequestRef{}, fmt.Errorf("invalid PR number or URL %q", arg)
+	// Parameterized templates
+	if template.QueryTemplate == "" {
+		return "", fmt.Errorf("parameterized template missing query_template")
 	}
 
-	matches := pullRequestRefRegex.FindStringSubmatch(parsedURL.Path)
-	if len(matches) != 4 {
-		return PullRequestRef{}, fmt.Errorf("invalid GitHub PR URL %q", arg)
+	query := template.QueryTemplate
+
+	// Handle single value substitution
+	if strings.Contains(query, "{value}") {
+		query = strings.ReplaceAll(query, "{value}", value)
 	}
 
-	urlRepo := matches[1] + "/" + matches[2]
-	prNumber, err := strconv.Atoi(matches[3])
-	if err != nil {
-		return PullRequestRef{}, fmt.Errorf("invalid PR number in URL %q", arg)
+	// Handle multi-value substitution (for labels)
+	if strings.Contains(query, "{labels}") {
+		var labelTerms []string
+		for _, label := range values {
+			if strings.HasPrefix(label, "-") {
+				labelName := strings.TrimPrefix(label, "-")
+				labelTerms = append(labelTerms, fmt.Sprintf("-label:%s", labelName))
+			} else {
+				labelTerms = append(labelTerms, fmt.Sprintf("label:%s", label))
+			}
+		}
+		query = strings.ReplaceAll(query, "{labels}", strings.Join(labelTerms, " "))
 	}
 
-	return PullRequestRef{Number: prNumber, Repo: urlRepo}, nil
-}
-
-// Config holds all configuration and arguments for the application.
-type Config struct {
-	Repositories []string
-	ParsedPRs    []PullRequestRef
-	Actions      []actions.Action
-	Filters      []filters.FilterDefinition
-	SearchQuery  string
-	// Runtime flags
-	Throttle         time.Duration
-	DebugMode        bool
-	Detailed         bool
-	DetailedWithLogs bool
-	Quiet            bool
+	return query, nil
 }
 
 // parseAndValidateArgs parses command line arguments and validates
 // repository requirements.
-func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[string]*bool, templateRegistry *search.TemplateRegistry, templateFlags map[string]*bool, parameterisedTemplateFlags map[string]interface{}, flagRefs map[string]interface{}) (*Config, error) {
+func parseAndValidateArgs(availableActions map[string]ActionDefinition, actionFlags map[string]*bool, availableTemplates map[string]QueryTemplate, templateFlags map[string]*bool, parameterisedTemplateFlags map[string]interface{}, flagRefs map[string]interface{}) (*Config, error) {
 	// Extract runtime flags
 	repo := flagRefs["repo"].(*string)
 	comment := flagRefs["comment"].(*[]string)
@@ -306,7 +282,7 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 	hasNumericArgs := false
 
 	for _, s := range prNumbers {
-		prArg, err := parsePRArgument(s)
+		prArg, err := ParsePRArgument(s)
 		if err != nil {
 			return nil, err
 		}
@@ -333,17 +309,17 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 	}
 	sort.Strings(repoList)
 
-	var allActions []actions.Action
+	var allActions []Action
 	for _, c := range *comment {
-		allActions = append(allActions, actions.Action{
+		allActions = append(allActions, Action{
 			Comment:   c,
-			Predicate: actions.PredicateNone,
+			Predicate: PredicateNone,
 		})
 	}
 
 	for flag, flagPtr := range actionFlags {
 		if *flagPtr {
-			actionDef, exists := actionRegistry.GetAction(flag)
+			actionDef, exists := availableActions[flag]
 			if exists {
 				allActions = append(allActions, actionDef.ToAction())
 			}
@@ -356,7 +332,7 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 	// Handle boolean templates (non-parameterised).
 	for flag, flagPtr := range templateFlags {
 		if *flagPtr {
-			template, exists := templateRegistry.GetTemplate(flag)
+			template, exists := availableTemplates[flag]
 			if exists && !template.Parameterized {
 				queryTerms = append(queryTerms, template.Query)
 			}
@@ -365,7 +341,7 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 
 	// Handle parameterised templates.
 	for flag, flagPtr := range parameterisedTemplateFlags {
-		_, exists := templateRegistry.GetTemplate(flag)
+		template, exists := availableTemplates[flag]
 		if !exists {
 			continue
 		}
@@ -374,9 +350,9 @@ func parseAndValidateArgs(actionRegistry *actions.Registry, actionFlags map[stri
 		var queryErr error
 
 		if stringPtr, ok := flagPtr.(*string); ok && *stringPtr != "" {
-			query, queryErr = templateRegistry.BuildQuery(flag, *stringPtr, nil)
+			query, queryErr = buildQuery(template, *stringPtr, nil)
 		} else if slicePtr, ok := flagPtr.(*[]string); ok && len(*slicePtr) > 0 {
-			query, queryErr = templateRegistry.BuildQuery(flag, "", *slicePtr)
+			query, queryErr = buildQuery(template, "", *slicePtr)
 		}
 
 		if queryErr == nil && query != "" {

@@ -1,5 +1,0 @@
-name: needs-ok-to-test
-flag: needs-ok-to-test
-description: "Include only PRs that have the 'needs-ok-to-test' label"
-filter_type: "label_presence"
-label: "needs-ok-to-test"

@@ -3,24 +3,25 @@ package main
 import (
 	"os"
 	"testing"
-
-	"github.com/frobware/autoprat/github/actions"
-	"github.com/frobware/autoprat/github/search"
 )
 
 func TestRenderHelpComplete(t *testing.T) {
 	// Create registries and use DefineAllFlags to get real data
-	actionRegistry, err := actions.NewRegistry()
+	actionRegistry, err := NewRegistry()
 	if err != nil {
 		t.Fatalf("Failed to create action registry: %v", err)
 	}
 
-	templateRegistry, err := search.NewTemplateRegistry()
+	templateRegistry, err := NewTemplateRegistry()
 	if err != nil {
 		t.Fatalf("Failed to create template registry: %v", err)
 	}
 
-	categories := DefineAllFlags(actionRegistry, templateRegistry)
+	// Extract plain data structures
+	availableActions := actionRegistry.GetAllActions()
+	availableTemplates := templateRegistry.GetAllTemplates()
+
+	categories := DefineAllFlags(availableActions, availableTemplates)
 
 	// Filter to only embedded actions and templates (ignore user-defined ones)
 	var filteredCategories []FlagCategory
@@ -31,7 +32,7 @@ func TestRenderHelpComplete(t *testing.T) {
 			// Only include embedded filters
 			var embeddedFilters []FlagInfo
 			for _, flag := range cat.Flags {
-				template, exists := templateRegistry.GetTemplate(flag.Name)
+				template, exists := availableTemplates[flag.Name]
 				if exists && template.Source == "embedded" {
 					embeddedFilters = append(embeddedFilters, flag)
 				}
@@ -51,8 +52,8 @@ func TestRenderHelpComplete(t *testing.T) {
 					embeddedActions = append(embeddedActions, flag)
 					continue
 				}
-				// Include embedded actions from registry
-				action, exists := actionRegistry.GetAction(flag.Name)
+				// Include embedded actions from available actions
+				action, exists := availableActions[flag.Name]
 				if exists && action.Source == "embedded" {
 					embeddedActions = append(embeddedActions, flag)
 				}
@@ -146,17 +147,21 @@ func TestFlagDisplay(t *testing.T) {
 }
 
 func TestDefineAllFlags(t *testing.T) {
-	actionRegistry, err := actions.NewRegistry()
+	actionRegistry, err := NewRegistry()
 	if err != nil {
 		t.Fatalf("Failed to create action registry: %v", err)
 	}
 
-	templateRegistry, err := search.NewTemplateRegistry()
+	templateRegistry, err := NewTemplateRegistry()
 	if err != nil {
 		t.Fatalf("Failed to create template registry: %v", err)
 	}
 
-	categories := DefineAllFlags(actionRegistry, templateRegistry)
+	// Extract plain data structures
+	availableActions := actionRegistry.GetAllActions()
+	availableTemplates := templateRegistry.GetAllTemplates()
+
+	categories := DefineAllFlags(availableActions, availableTemplates)
 
 	// Verify we have the expected sections
 	expectedSections := map[string]bool{

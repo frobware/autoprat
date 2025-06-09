@@ -41,11 +41,11 @@ go install github.com/frobware/autoprat@latest
 autoprat -r your-org/your-repo --needs-approve --needs-lgtm
 
 # Focus on specific PRs by number or URL.
-autoprat -r your-org/your-repo --verbose 123 456
-autoprat --verbose https://github.com/your-org/your-repo/pull/123
+autoprat -r your-org/your-repo --detailed 123 456
+autoprat --detailed https://github.com/your-org/your-repo/pull/123
 
 # Monitor PRs across multiple repositories.
-autoprat --verbose https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456
+autoprat --detailed https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456
 
 # Approve trusted bot PRs.
 autoprat -r your-org/your-repo --author dependabot --approve | sh
@@ -74,7 +74,7 @@ autoprat -r myorg/myrepo --needs-ok-to-test --ok-to-test | sh
 autoprat -r myorg/myrepo --failing-ci
 
 # See detailed failure info with logs.
-autoprat -r myorg/myrepo --failing-ci --verbose
+autoprat -r myorg/myrepo --failing-ci --detailed-with-logs
 
 # Comment on all failing PRs.
 autoprat -r myorg/myrepo --failing-ci --comment "Investigating CI failures" | sh
@@ -99,7 +99,7 @@ autoprat -r myorg/myrepo --author "trusted-contributor" --needs-approve
 ### Multi-Repository Workflows
 ```bash
 # Monitor related PRs across multiple repositories.
-autoprat --verbose \
+autoprat --detailed \
   https://github.com/myorg/backend/pull/123 \
   https://github.com/myorg/frontend/pull/456
 
@@ -149,25 +149,25 @@ autoprat -r myorg/myrepo --failing-ci \
   --comment "Restarting CI" --throttle 30m | sh
 ```
 
-### Intelligent Verbose Output
-Two levels of verbosity for different needs:
+### Intelligent Detailed Output
+Two levels of detail for different needs:
 
-**Basic verbose (`-v`)** - Detailed PR tree view with URLs:
+**Basic detailed (`-d`)** - Detailed PR tree view with URLs:
 ```bash
 # See PR status, labels, and CI check results.
-autoprat -r myorg/myrepo --verbose
+autoprat -r myorg/myrepo --detailed
 
 # Focus on failing PRs with full status tree.
-autoprat -r myorg/myrepo --failing-ci --verbose
+autoprat -r myorg/myrepo --failing-ci --detailed
 ```
 
-**Super verbose (`-V`)** - Same as `-v` plus automatic error log extraction:
+**Detailed with logs (`-D`)** - Same as `-d` plus automatic error log extraction:
 ```bash
 # See WHY CI checks are failing without clicking URLs.
-autoprat -r myorg/myrepo --failing-ci -V
+autoprat -r myorg/myrepo --failing-ci --detailed-with-logs
 
 # Get immediate failure insights for triage.
-autoprat -r myorg/myrepo -V
+autoprat -r myorg/myrepo --detailed-with-logs
 ```
 
 
@@ -211,8 +211,8 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `--throttle DURATION` - Skip if same comment posted recently (e.g. `5m`, `1h`)
 
 ### Output
-- `--verbose, -v` - Detailed PR tree view with CI status and URLs
-- `--verbose-verbose, -V` - Same as `-v` plus automatic error log extraction from failures
+- `--detailed, -d` - Detailed PR tree view with CI status and URLs
+- `--detailed-with-logs, -D` - Same as `-d` plus automatic error log extraction from failures
 - `--quiet, -q` - PR numbers only
 
 ### Debugging
@@ -242,8 +242,8 @@ make build
 
 1. **Start with filters** - Run without action flags to see which PRs match
 2. **Review before executing** - Always check generated commands first
-3. **Focus on specific PRs** - Add PR numbers or URLs as arguments: `autoprat -r repo -v 123 456` or `autoprat -v https://github.com/owner/repo/pull/123`
-   **Multi-repository** - Monitor PRs across repositories: `autoprat -v https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456`
+3. **Focus on specific PRs** - Add PR numbers or URLs as arguments: `autoprat -r repo -d 123 456` or `autoprat -d https://github.com/owner/repo/pull/123`
+   **Multi-repository** - Monitor PRs across repositories: `autoprat -d https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456`
 4. **Use throttling** - Prevent spam with `--throttle` in automated workflows
 5. **Combine filters** - Multiple filters use AND logic for precise targeting
 6. **Exact check names** - Use `--failing-check` with exact CI check names for safety

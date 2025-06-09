@@ -1,4 +1,4 @@
-package actions
+package main
 
 import (
 	"embed"
@@ -44,6 +44,16 @@ func (ad ActionDefinition) ToAction() Action {
 	}
 }
 
+// ActionLoadMode controls what action sources to load.
+type ActionLoadMode int
+
+const (
+	ActionLoadNothing  ActionLoadMode = 0 // Load nothing
+	ActionLoadEmbedded ActionLoadMode = 1 // Load embedded actions only
+	ActionLoadUser     ActionLoadMode = 2 // Load user actions only
+	ActionLoadAll      ActionLoadMode = 3 // Load embedded + user actions
+)
+
 // Registry holds all available actions loaded from embedded and user
 // sources.
 type Registry struct {
@@ -53,19 +63,28 @@ type Registry struct {
 // NewRegistry creates a new action registry and loads all available
 // actions.
 func NewRegistry() (*Registry, error) {
+	return NewRegistryWithMode(ActionLoadAll)
+}
+
+// NewRegistryWithMode creates a new action registry with specified load mode.
+func NewRegistryWithMode(mode ActionLoadMode) (*Registry, error) {
 	r := &Registry{
 		actions: make(map[string]ActionDefinition),
 	}
 
-	// Load embedded actions first.
-	if err := r.loadEmbeddedActions(); err != nil {
-		return nil, fmt.Errorf("failed to load embedded actions: %w", err)
+	// Load embedded actions if requested.
+	if mode&ActionLoadEmbedded != 0 {
+		if err := r.loadEmbeddedActions(); err != nil {
+			return nil, fmt.Errorf("failed to load embedded actions: %w", err)
+		}
 	}
 
-	// Load user actions (optional).
-	if err := r.loadUserActions(); err != nil {
-		// User actions are optional, so we only warn on errors.
-		fmt.Fprintf(os.Stderr, "Warning: failed to load user actions: %v\n", err)
+	// Load user actions if requested.
+	if mode&ActionLoadUser != 0 {
+		if err := r.loadUserActions(); err != nil {
+			// User actions are optional, so we only warn on errors.
+			fmt.Fprintf(os.Stderr, "Warning: failed to load user actions: %v\n", err)
+		}
 	}
 
 	return r, nil

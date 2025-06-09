@@ -1,0 +1,4 @@
+name: "Needs OK To Test"
+flag: "needs-ok-to-test"
+description: "PRs needing testing permission"
+query: "label:needs-ok-to-test"

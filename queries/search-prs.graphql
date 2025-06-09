@@ -1,0 +1,85 @@
+query($query: String!) {
+  search(query: $query, type: ISSUE, first: 100) {
+    nodes {
+      ... on PullRequest {
+        number
+        title
+        headRefName
+        createdAt
+        state
+        mergeable
+        mergeStateStatus
+        reviewDecision
+        author {
+          login
+          __typename
+        }
+        labels(first: 20) {
+          nodes {
+            name
+          }
+        }
+        url
+        latestReviews(last: 10) {
+          nodes {
+            author {
+              login
+            }
+            state
+            submittedAt
+          }
+        }
+        reviewRequests(first: 10) {
+          nodes {
+            requestedReviewer {
+              ... on User {
+                login
+              }
+              ... on Team {
+                name
+              }
+            }
+          }
+        }
+        statusCheckRollup {
+          contexts(first: 100) {
+            nodes {
+              __typename
+              ... on CheckRun {
+                name
+                conclusion
+                detailsUrl
+                startedAt
+                completedAt
+              }
+              ... on StatusContext {
+                context
+                state
+                targetUrl
+              }
+            }
+          }
+        }
+        commits(last: 1) {
+          nodes {
+            commit {
+              oid
+              status {
+                state
+              }
+            }
+          }
+        }
+        comments(last: 15) {
+          nodes {
+            author {
+              login
+            }
+            body
+            createdAt
+          }
+        }
+      }
+    }
+  }
+}

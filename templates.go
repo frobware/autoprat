@@ -1,4 +1,4 @@
-package search
+package main
 
 import (
 	"embed"
@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed templates/embedded/*.yaml
+//go:embed github/search/templates/embedded/*.yaml
 var embeddedTemplates embed.FS
 
 // QueryTemplate represents a query template loaded from YAML.
@@ -27,6 +27,16 @@ type QueryTemplate struct {
 	Source           string `yaml:"-"` // "embedded" or "user"
 }
 
+// TemplateLoadMode controls what template sources to load.
+type TemplateLoadMode int
+
+const (
+	TemplateLoadNothing  TemplateLoadMode = 0 // Load nothing
+	TemplateLoadEmbedded TemplateLoadMode = 1 // Load embedded templates only
+	TemplateLoadUser     TemplateLoadMode = 2 // Load user templates only
+	TemplateLoadAll      TemplateLoadMode = 3 // Load embedded + user templates
+)
+
 // TemplateRegistry holds all available query templates.
 type TemplateRegistry struct {
 	templates map[string]QueryTemplate
@@ -34,16 +44,27 @@ type TemplateRegistry struct {
 
 // NewTemplateRegistry creates a new template registry and loads all templates.
 func NewTemplateRegistry() (*TemplateRegistry, error) {
+	return NewTemplateRegistryWithMode(TemplateLoadAll)
+}
+
+// NewTemplateRegistryWithMode creates a new template registry with specified load mode.
+func NewTemplateRegistryWithMode(mode TemplateLoadMode) (*TemplateRegistry, error) {
 	r := &TemplateRegistry{
 		templates: make(map[string]QueryTemplate),
 	}
 
-	if err := r.loadEmbeddedTemplates(); err != nil {
-		return nil, fmt.Errorf("failed to load embedded templates: %w", err)
+	// Load embedded templates if requested.
+	if mode&TemplateLoadEmbedded != 0 {
+		if err := r.loadEmbeddedTemplates(); err != nil {
+			return nil, fmt.Errorf("failed to load embedded templates: %w", err)
+		}
 	}
 
-	if err := r.loadUserTemplates(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to load user templates: %v\n", err)
+	// Load user templates if requested.
+	if mode&TemplateLoadUser != 0 {
+		if err := r.loadUserTemplates(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load user templates: %v\n", err)
+		}
 	}
 
 	return r, nil
@@ -51,7 +72,7 @@ func NewTemplateRegistry() (*TemplateRegistry, error) {
 
 // loadEmbeddedTemplates loads templates from the embedded filesystem.
 func (r *TemplateRegistry) loadEmbeddedTemplates() error {
-	entries, err := embeddedTemplates.ReadDir("templates/embedded")
+	entries, err := embeddedTemplates.ReadDir("github/search/templates/embedded")
 	if err != nil {
 		return fmt.Errorf("failed to read embedded templates directory: %w", err)
 	}
@@ -61,7 +82,7 @@ func (r *TemplateRegistry) loadEmbeddedTemplates() error {
 			continue
 		}
 
-		content, err := embeddedTemplates.ReadFile("templates/embedded/" + entry.Name())
+		content, err := embeddedTemplates.ReadFile("github/search/templates/embedded/" + entry.Name())
 		if err != nil {
 			return fmt.Errorf("failed to read embedded template file %s: %w", entry.Name(), err)
 		}

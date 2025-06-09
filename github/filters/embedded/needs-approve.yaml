@@ -1,5 +1,0 @@
-name: needs-approve
-flag: needs-approve
-description: "Include only PRs missing the 'approved' label"
-filter_type: "label_absence"
-label: "approved"
