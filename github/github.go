@@ -30,7 +30,8 @@ type comments struct {
 }
 
 type author struct {
-	Login string `json:"login"`
+	Login    string `json:"login"`
+	Typename string `json:"__typename"`
 }
 
 type labels struct {
@@ -77,6 +78,7 @@ func searchPullRequests(query string) ([]PullRequest, error) {
 			State:             gqlPR.State,
 			Labels:            labelNames,
 			AuthorLogin:       gqlPR.Author.Login,
+			AuthorType:        gqlPR.Author.Typename,
 			URL:               gqlPR.URL,
 			StatusCheckRollup: gqlPR.StatusCheckRollup,
 			Comments:          gqlPR.Comments.Nodes,

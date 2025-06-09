@@ -212,7 +212,7 @@ func outputResults(allRepositoryPRs []RepositoryPRs, config *Config, shouldPrint
 				yesNo(lgtm),
 				yesNo(!okToTest),
 				yesNo(hold),
-				pr.AuthorLogin,
+				pr.Author(),
 				lastCommented,
 				pr.Title,
 			)

@@ -17,6 +17,7 @@ type PullRequest struct {
 	CreatedAt         string
 	Labels            []string
 	AuthorLogin       string
+	AuthorType        string
 	URL               string
 	State             string
 	StatusCheckRollup StatusCheckRollup
@@ -92,7 +93,7 @@ func (pr PullRequest) CIStatus() string {
 		if st == "" {
 			st = c.Conclusion
 		}
-		if st == "FAILURE" {
+		if st == "FAILURE" || st == "ACTION_REQUIRED" {
 			return "Failing"
 		}
 	}
@@ -106,6 +107,24 @@ func (pr PullRequest) CIStatus() string {
 		}
 	}
 	return "Passing"
+}
+
+// Author returns the author name for display purposes.
+// For bots, shows the full "app/botname" format to match search expectations.
+func (pr PullRequest) Author() string {
+	if pr.AuthorType == "Bot" {
+		return "app/" + pr.AuthorLogin
+	}
+	return pr.AuthorLogin
+}
+
+// SearchAuthorName returns the author name in the format expected by GitHub search.
+// For bots, GitHub search expects "app/botname" but GraphQL returns just "botname".
+func (pr PullRequest) SearchAuthorName() string {
+	if pr.AuthorType == "Bot" {
+		return "app/" + pr.AuthorLogin
+	}
+	return pr.AuthorLogin
 }
 
 // PrintThrottleDiagnostics shows what the throttling logic would do for debugging.

@@ -12,6 +12,7 @@ query($query: String!) {
         reviewDecision
         author {
           login
+          __typename
         }
         labels(first: 20) {
           nodes {
