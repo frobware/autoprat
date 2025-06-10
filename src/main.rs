@@ -342,9 +342,9 @@ struct Cli {
     #[arg(long)]
     retest: bool,
 
-    /// Generate custom comment commands
+    /// Generate custom comment commands (can specify multiple)
     #[arg(short = 'c', long)]
-    comment: Option<String>,
+    comment: Vec<String>,
 
     /// Skip if same comment posted recently (e.g. 5m, 1h)
     #[arg(long, value_name = "DURATION")]
@@ -1105,7 +1105,8 @@ fn generate_action_commands(prs: &[PrInfo], cli: &Cli) -> Result<Vec<String>> {
                 ));
             }
         }
-        if let Some(comment_text) = &cli.comment {
+
+        for comment_text in &cli.comment {
             if !should_throttle_comment(comment_text, &pr_info.recent_comments, throttle_duration) {
                 commands.push(format!(
                     "gh pr comment {} --repo {} --body \"{}\"",
@@ -1607,7 +1608,7 @@ fn build_search_query_from_cli(repo: &str, cli: &Cli) -> Result<String> {
 
 /// Determines whether any action commands are enabled in the CLI configuration.
 fn has_action_commands(cli: &Cli) -> bool {
-    cli.approve || cli.lgtm || cli.ok_to_test || cli.close || cli.retest || cli.comment.is_some()
+    cli.approve || cli.lgtm || cli.ok_to_test || cli.close || cli.retest || !cli.comment.is_empty()
 }
 
 /// Outputs generated GitHub CLI commands to stdout for execution.
