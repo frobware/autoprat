@@ -64,10 +64,20 @@ fn get_rustc_version() -> Option<String> {
 }
 
 /// Checks if the working directory has uncommitted changes.
-fn is_git_dirty() -> bool {
-    git_command(&["status", "--porcelain"])
-        .map(|output| !output.is_empty())
-        .unwrap_or(false)
+/// Returns None if git is not available or not in a git repository.
+///
+/// Filters out .cargo-ok which is created by `cargo install --git` in the
+/// source checkout directory. This file is not part of the actual source
+/// and should not trigger the "dirty" flag during installation, whilst
+/// preserving detection of real uncommitted changes during development.
+fn is_git_dirty() -> Option<bool> {
+    git_command(&["status", "--porcelain"]).map(|output| {
+        output.lines().any(|line| {
+            let path = &line[3..]; // Skip the status prefix
+            // Ignore .cargo-ok file created by cargo install
+            path != ".cargo-ok"
+        })
+    })
 }
 
 /// Returns a human-readable Git version string for embedding in build
@@ -104,22 +114,33 @@ fn generate_pseudo_version() -> String {
     let is_dirty = is_git_dirty();
 
     // Use commit timestamp for clean builds, build timestamp for
-    // dirty builds.
-    let timestamp = if is_dirty {
-        // For dirty builds, show when the binary was built (more
-        // relevant).
-        Utc::now().format("%Y%m%d%H%M%S").to_string()
-    } else {
-        // For clean builds, show when the commit was made
-        // (deterministic).
-        git_command(&["log", "-1", "--format=%ct"])
-            .and_then(|s| s.parse::<i64>().ok())
-            .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
-            .map(|dt| dt.format("%Y%m%d%H%M%S").to_string())
-            .unwrap_or_else(|| Utc::now().format("%Y%m%d%H%M%S").to_string())
+    // dirty builds, or build timestamp if git is unavailable.
+    let timestamp = match is_dirty {
+        Some(true) => {
+            // For dirty builds, show when the binary was built (more
+            // relevant).
+            Utc::now().format("%Y%m%d%H%M%S").to_string()
+        }
+        Some(false) => {
+            // For clean builds, show when the commit was made
+            // (deterministic).
+            git_command(&["log", "-1", "--format=%ct"])
+                .and_then(|s| s.parse::<i64>().ok())
+                .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+                .map(|dt| dt.format("%Y%m%d%H%M%S").to_string())
+                .unwrap_or_else(|| Utc::now().format("%Y%m%d%H%M%S").to_string())
+        }
+        None => {
+            // No git available, use build timestamp.
+            Utc::now().format("%Y%m%d%H%M%S").to_string()
+        }
     };
 
-    let dirty_suffix = if is_dirty { "+dirty" } else { "" };
+    let dirty_suffix = match is_dirty {
+        Some(true) => "+dirty",
+        Some(false) => "",
+        None => "", // No git available, don't mark as dirty
+    };
     let version = env!("CARGO_PKG_VERSION");
 
     format!("v{version}-{timestamp}-{commit_hash}{dirty_suffix}")
