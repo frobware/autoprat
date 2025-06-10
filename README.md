@@ -139,15 +139,9 @@ Built-in actions are smart and safe to run repeatedly:
 ```bash
 # Safe to run multiple times - only acts when needed.
 autoprat -r myorg/myrepo --approve | sh
-
-# Will only approve PRs that don't already have 'approved' label.
-# Will only /lgtm PRs that don't already have 'lgtm' label.
-# Will only /ok-to-test PRs that have 'needs-ok-to-test' label.
-# Will always close PRs when --close is specified.
-# Will always retest PRs when --retest is specified.
 ```
 
-The built-in actions (`--approve`, `--lgtm`, `--ok-to-test`) check existing labels and only generate commands when appropriate. The `--close` and `--retest` actions always execute when specified. This makes the conditional actions perfect for automation - no duplicate comments, no spam.
+The conditional actions (`--approve`, `--lgtm`, `--ok-to-test`) check existing labels and only generate commands when appropriate, whilst `--close` and `--retest` always execute when specified. Perfect for automation - no duplicate comments, no spam.
 
 ### Comment Throttling
 Prevent spam when running in loops:
