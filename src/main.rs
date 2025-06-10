@@ -307,7 +307,7 @@ struct Cli {
     failing_ci: bool,
 
     /// Specific CI check is failing (exact match)
-    #[arg(long = "failing-check")]
+    #[arg(long = "failing-check", value_name = "NAME")]
     failing_check: Vec<String>,
 
     /// Missing 'approved' label
@@ -347,7 +347,7 @@ struct Cli {
     comment: Option<String>,
 
     /// Skip if same comment posted recently (e.g. 5m, 1h)
-    #[arg(long)]
+    #[arg(long, value_name = "DURATION")]
     throttle: Option<String>,
 
     /// Show detailed PR information
