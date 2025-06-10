@@ -92,8 +92,8 @@ autoprat -r myorg/myrepo --failing-ci --author "external-contributor" --close | 
 
 ### Advanced Filtering
 ```bash
-# PRs from bot authors that need LGTM.
-autoprat -r myorg/myrepo --needs-lgtm --author-substring "bot"
+# PRs from specific author that need LGTM.
+autoprat -r myorg/myrepo --needs-lgtm --author "dependabot"
 
 # High priority bugs without holds.
 autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "-do-not-merge/hold"
@@ -115,7 +115,7 @@ autoprat --author dependabot --approve \
   https://github.com/myorg/repo2/pull/456
 
 # Bulk approve Dependabot PRs across an organization.
-autoprat --author-substring "dependabot" --approve \
+autoprat --author "dependabot" --approve \
   https://github.com/myorg/backend/pull/789 \
   https://github.com/myorg/frontend/pull/101 \
   https://github.com/myorg/docs/pull/202
@@ -202,7 +202,6 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 
 ### Filters (combine with AND logic)
 - `-a, --author <AUTHOR>` - Exact author match
-- `--author-substring <AUTHOR_SUBSTRING>` - Author contains text
 - `--label <LABEL>` - Has label (prefix `-` to negate, can specify multiple)
 - `--failing-ci` - Has failing CI checks
 - `--failing-check <FAILING_CHECK>` - Specific CI check is failing (exact match)
