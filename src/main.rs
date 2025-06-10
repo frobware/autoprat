@@ -2,8 +2,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use chrono_humanize::HumanTime;
 use clap::Parser;
-use comfy_table::{Cell, Table, presets::NOTHING};
 use octocrab::{
     Octocrab,
     models::{StatusState, workflows::Conclusion},
@@ -696,33 +696,7 @@ fn parse_duration(duration_str: &str) -> Result<chrono::Duration> {
 }
 
 fn format_relative_time(created_at: DateTime<Utc>) -> String {
-    let now = Utc::now();
-    let duration = now.signed_duration_since(created_at);
-
-    if duration.num_days() > 0 {
-        let days = duration.num_days();
-        if days == 1 {
-            "about 1 day ago".to_string()
-        } else {
-            format!("about {} days ago", days)
-        }
-    } else if duration.num_hours() > 0 {
-        let hours = duration.num_hours();
-        if hours == 1 {
-            "about 1 hour ago".to_string()
-        } else {
-            format!("about {} hours ago", hours)
-        }
-    } else if duration.num_minutes() > 0 {
-        let minutes = duration.num_minutes();
-        if minutes == 1 {
-            "about 1 minute ago".to_string()
-        } else {
-            format!("about {} minutes ago", minutes)
-        }
-    } else {
-        "about a minute ago".to_string()
-    }
+    HumanTime::from(created_at).to_string()
 }
 
 fn create_graphql_query() -> serde_json::Value {
@@ -1246,9 +1220,8 @@ fn display_prs_table(prs: &[PrInfo]) -> Result<()> {
         return Ok(());
     }
 
-    let mut table = Table::new();
-    table.load_preset(NOTHING);
-    table.set_header(vec![
+    // Column headers
+    let headers = [
         "URL",
         "CI",
         "APP",
@@ -1256,9 +1229,12 @@ fn display_prs_table(prs: &[PrInfo]) -> Result<()> {
         "OK2TST",
         "HOLD",
         "AUTHOR",
-        "TITLE",
         "CREATED AT",
-    ]);
+        "TITLE",
+    ];
+
+    // Prepare all rows with truncated titles
+    let mut rows: Vec<Vec<String>> = Vec::new();
 
     for pr_info in prs {
         let pr = &pr_info.pr;
@@ -1284,20 +1260,60 @@ fn display_prs_table(prs: &[PrInfo]) -> Result<()> {
             "N"
         };
 
-        table.add_row(vec![
-            Cell::new(&pr.url),
-            Cell::new(ci_status.to_string()),
-            Cell::new(approved),
-            Cell::new(lgtm),
-            Cell::new(ok2test),
-            Cell::new(hold),
-            Cell::new(&pr.author_simple_name),
-            Cell::new(&pr.title),
-            Cell::new(format_relative_time(pr.created_at)),
+        // No need to truncate title since it's the last column
+        let title = pr.title.clone();
+
+        rows.push(vec![
+            pr.url.clone(),
+            ci_status.to_string(),
+            approved.to_string(),
+            lgtm.to_string(),
+            ok2test.to_string(),
+            hold.to_string(),
+            pr.author_simple_name.clone(),
+            format_relative_time(pr.created_at),
+            title,
         ]);
     }
 
-    println!("{}", table);
+    // Calculate column widths
+    let mut widths = headers.iter().map(|h| h.len()).collect::<Vec<_>>();
+
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.len());
+        }
+    }
+
+    // Print header
+    for (i, header) in headers.iter().enumerate() {
+        print!("{:<width$}", header, width = widths[i]);
+        if i < headers.len() - 1 {
+            print!("  ");
+        }
+    }
+    println!();
+
+    // Print separator
+    for (i, &width) in widths.iter().enumerate() {
+        print!("{}", "-".repeat(width));
+        if i < widths.len() - 1 {
+            print!("  ");
+        }
+    }
+    println!();
+
+    // Print data rows
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate() {
+            print!("{:<width$}", cell, width = widths[i]);
+            if i < row.len() - 1 {
+                print!("  ");
+            }
+        }
+        println!();
+    }
+
     Ok(())
 }
 
