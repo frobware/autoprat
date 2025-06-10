@@ -89,6 +89,8 @@ pub enum BotCommand {
     Approve,
     Lgtm,
     OkToTest,
+    Close,
+    Retest,
 }
 
 /// Distinguishes between different types of GitHub status check contexts.
@@ -154,6 +156,8 @@ impl BotCommand {
             BotCommand::Approve => "/approve",
             BotCommand::Lgtm => "/lgtm",
             BotCommand::OkToTest => "/ok-to-test",
+            BotCommand::Close => "/close",
+            BotCommand::Retest => "/retest",
         }
     }
 }
@@ -277,7 +281,7 @@ impl std::fmt::Display for CiStatus {
 #[derive(Parser)]
 #[command(name = "autoprat")]
 #[command(
-    about = "Stop clicking through GitHub PRs one by one - finds PRs you care about and generates commands to act on them in bulk"
+    about = "Stop clicking through GitHub PRs one by one - finds PRs you care about and generates commands to act on them in bulk (approve, LGTM, retest, close, etc.)"
 )]
 #[command(version, long_version = ENHANCED_VERSION)]
 struct Cli {
@@ -329,6 +333,14 @@ struct Cli {
     /// Generate /ok-to-test commands
     #[arg(long = "ok-to-test")]
     ok_to_test: bool,
+
+    /// Close PRs
+    #[arg(long)]
+    close: bool,
+
+    /// Generate /retest commands
+    #[arg(long)]
+    retest: bool,
 
     /// Generate custom comment commands
     #[arg(short = 'c', long)]
@@ -778,7 +790,7 @@ async fn process_prs_streaming(
 ) -> Result<(Vec<String>, Vec<PrInfo>)> {
     let mut action_commands = Vec::new();
     let mut all_prs = Vec::new();
-    let has_actions = cli.approve || cli.lgtm || cli.ok_to_test || cli.comment.is_some();
+    let has_actions = has_action_commands(cli);
     let mut after_cursor: Option<String> = None;
     let mut page_count = 0;
     let mut processed_count = 0;
@@ -1069,6 +1081,7 @@ fn generate_action_commands(prs: &[PrInfo], cli: &Cli) -> Result<Vec<String>> {
         (cli.ok_to_test, BotCommand::OkToTest, |pr: &SimplePR| {
             has_label(pr, KnownLabel::NeedsOkToTest)
         }),
+        (cli.retest, BotCommand::Retest, |_pr: &SimplePR| true),
     ];
 
     for pr_info in prs {
@@ -1099,6 +1112,11 @@ fn generate_action_commands(prs: &[PrInfo], cli: &Cli) -> Result<Vec<String>> {
                     pr_number, repo_full, comment_text
                 ));
             }
+        }
+
+        // Handle close action separately since it doesn't post a comment
+        if cli.close {
+            commands.push(format!("gh pr close {} --repo {}", pr_number, repo_full));
         }
     }
 
@@ -1589,7 +1607,7 @@ fn build_search_query_from_cli(repo: &str, cli: &Cli) -> Result<String> {
 
 /// Determines whether any action commands are enabled in the CLI configuration.
 fn has_action_commands(cli: &Cli) -> bool {
-    cli.approve || cli.lgtm || cli.ok_to_test || cli.comment.is_some()
+    cli.approve || cli.lgtm || cli.ok_to_test || cli.close || cli.retest || cli.comment.is_some()
 }
 
 /// Outputs generated GitHub CLI commands to stdout for execution.
