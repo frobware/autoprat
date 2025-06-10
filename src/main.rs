@@ -298,7 +298,7 @@ struct Cli {
     #[arg(short = 'a', long = "author")]
     author: Option<String>,
 
-    /// Has label (prefix ! to negate)
+    /// Has label (prefix ! to negate, can specify multiple)
     #[arg(long)]
     label: Vec<String>,
 
