@@ -9,19 +9,8 @@ use octocrab::{
     models::{StatusState, workflows::Conclusion},
 };
 use serde::{Deserialize, Deserializer};
-// Include build-time information
-use shadow_rs::shadow;
-shadow!(build);
-
-// Create enhanced version information at compile time
-const ENHANCED_VERSION: &str = shadow_rs::formatcp!(
-    "version v{}\nBuilt: {}\nCommit: {}\nRust version: {}\nPlatform: {}",
-    build::PKG_VERSION,
-    build::BUILD_TIME_3339,
-    build::SHORT_COMMIT,
-    build::RUST_VERSION,
-    build::BUILD_TARGET
-);
+// Human-readable build info (for clap version display)
+const BUILD_INFO_HUMAN: &str = env!("BUILD_INFO_HUMAN");
 
 // GraphQL returns UPPERCASE enum values but octocrab expects snake_case
 // variants.
@@ -283,7 +272,7 @@ impl std::fmt::Display for CiStatus {
 #[command(
     about = "Stop clicking through GitHub PRs one by one - finds PRs you care about and generates commands to act on them in bulk (approve, LGTM, retest, close, etc.)"
 )]
-#[command(version, long_version = ENHANCED_VERSION)]
+#[command(long_version = BUILD_INFO_HUMAN)]
 struct Cli {
     /// GitHub repository in format 'owner/repo' (required when using numeric PR
     /// arguments or no PR arguments)
