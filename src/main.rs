@@ -331,7 +331,7 @@ struct Cli {
     ok_to_test: bool,
 
     /// Generate custom comment commands
-    #[arg(long)]
+    #[arg(short = 'c', long)]
     comment: Option<String>,
 
     /// Skip if same comment posted recently (e.g. 5m, 1h)
