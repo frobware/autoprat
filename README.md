@@ -79,9 +79,15 @@ autoprat -r myorg/myrepo --failing-ci --detailed-with-logs
 # Comment on all failing PRs.
 autoprat -r myorg/myrepo --failing-ci --comment "Investigating CI failures" | sh
 
+# Retest failing PRs.
+autoprat -r myorg/myrepo --failing-ci --retest | sh
+
 # Override specific failing check across multiple PRs.
 autoprat -r myorg/myrepo --failing-check "ci/test-flaky" \
   --comment "/override ci/test-flaky" | sh
+
+# Close stale PRs with failing CI.
+autoprat -r myorg/myrepo --failing-ci --author "external-contributor" --close | sh
 ```
 
 ### Advanced Filtering
@@ -90,7 +96,7 @@ autoprat -r myorg/myrepo --failing-check "ci/test-flaky" \
 autoprat -r myorg/myrepo --needs-lgtm --author-substring "bot"
 
 # High priority bugs without holds.
-autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "!do-not-merge/hold"
+autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "-do-not-merge/hold"
 
 # PRs missing approval from specific author.
 autoprat -r myorg/myrepo --author "trusted-contributor" --needs-approve
@@ -137,9 +143,11 @@ autoprat -r myorg/myrepo --approve | sh
 # Will only approve PRs that don't already have 'approved' label.
 # Will only /lgtm PRs that don't already have 'lgtm' label.
 # Will only /ok-to-test PRs that have 'needs-ok-to-test' label.
+# Will always close PRs when --close is specified.
+# Will always retest PRs when --retest is specified.
 ```
 
-The built-in actions (`--approve`, `--lgtm`, `--ok-to-test`) check existing labels and only generate commands when appropriate. This makes them perfect for automation - no duplicate comments, no spam.
+The built-in actions (`--approve`, `--lgtm`, `--ok-to-test`) check existing labels and only generate commands when appropriate. The `--close` and `--retest` actions always execute when specified. This makes the conditional actions perfect for automation - no duplicate comments, no spam.
 
 ### Comment Throttling
 Prevent spam when running in loops:
@@ -147,6 +155,11 @@ Prevent spam when running in loops:
 # Only post if same comment wasn't posted in last 30 minutes.
 autoprat -r myorg/myrepo --failing-ci \
   --comment "Restarting CI" --throttle 30m | sh
+
+# Post multiple comments to each matching PR.
+autoprat -r myorg/myrepo --failing-ci \
+  --comment "Investigating failures" \
+  --comment "/retest" | sh
 ```
 
 ### Intelligent Detailed Output
@@ -196,7 +209,7 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 ### Filters (combine with AND logic)
 - `-a, --author <AUTHOR>` - Exact author match
 - `--author-substring <AUTHOR_SUBSTRING>` - Author contains text
-- `--label <LABEL>` - Has label (prefix `!` to negate)
+- `--label <LABEL>` - Has label (prefix `-` to negate, can specify multiple)
 - `--failing-ci` - Has failing CI checks
 - `--failing-check <FAILING_CHECK>` - Specific CI check is failing (exact match)
 - `--needs-approve` - Missing 'approved' label
@@ -204,10 +217,12 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `--needs-ok-to-test` - Has 'needs-ok-to-test' label
 
 ### Actions
-- `--approve` - Generate `/approve` commands
-- `--lgtm` - Generate `/lgtm` commands
-- `--ok-to-test` - Generate `/ok-to-test` commands
-- `--comment <COMMENT>` - Generate custom comment commands
+- `--approve` - Generate `/approve` comments
+- `--lgtm` - Generate `/lgtm` comments
+- `--ok-to-test` - Generate `/ok-to-test` comments
+- `--close` - Close PRs
+- `--retest` - Generate `/retest` comments
+- `--comment <COMMENT>` - Generate custom comment commands (can specify multiple)
 - `--throttle <THROTTLE>` - Skip if same comment posted recently (e.g. `5m`, `1h`)
 
 ### Output
