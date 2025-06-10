@@ -100,6 +100,12 @@ autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "-do
 
 # PRs missing approval from specific author.
 autoprat -r myorg/myrepo --author "trusted-contributor" --needs-approve
+
+# Raw GitHub search queries for complex filtering.
+# Note: 'is:pr' and 'is:open' are automatically added if not present
+autoprat --query "repo:myorg/myrepo author:dependabot created:>2024-01-01"
+autoprat --query "repo:myorg/myrepo status:failure comments:>5"
+autoprat --query "repo:myorg/myrepo label:bug -label:wontfix updated:>2024-01-01"
 ```
 
 ### Multi-Repository Workflows
@@ -208,6 +214,7 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `--needs-approve` - Missing 'approved' label
 - `--needs-lgtm` - Missing 'lgtm' label
 - `--needs-ok-to-test` - Has 'needs-ok-to-test' label
+- `--query <QUERY>` - Raw GitHub search query (automatically adds `is:pr` and `is:open` if not present, mutually exclusive with all other filters and repository specification)
 
 ### Actions
 - `--approve` - Generate `/approve` comments

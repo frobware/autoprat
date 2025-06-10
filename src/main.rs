@@ -322,6 +322,10 @@ struct Cli {
     #[arg(long = "needs-ok-to-test")]
     needs_ok_to_test: bool,
 
+    /// Raw GitHub search query (mutually exclusive with filter options)
+    #[arg(long, conflicts_with_all = ["repo", "prs", "author", "label", "failing_ci", "failing_check", "needs_approve", "needs_lgtm", "needs_ok_to_test"])]
+    query: Option<String>,
+
     /// Generate /approve comments
     #[arg(long)]
     approve: bool,
@@ -1575,6 +1579,23 @@ async fn setup_github_client() -> Result<Octocrab> {
 /// Constructs a GitHub search query string from CLI filters and repository
 /// information.
 fn build_search_query_from_cli(repo: &str, cli: &Cli) -> Result<String> {
+    // If raw query is provided, ensure it includes is:pr and is:open
+    if let Some(query) = &cli.query {
+        let mut final_query = query.clone();
+
+        // Add is:pr if not present
+        if !final_query.contains("is:pr") {
+            final_query = format!("{} is:pr", final_query);
+        }
+
+        // Add is:open if no state specified
+        if !final_query.contains("is:open") && !final_query.contains("is:closed") {
+            final_query = format!("{} is:open", final_query);
+        }
+
+        return Ok(final_query);
+    }
+
     let (owner, repo_name) = parse_repo_from_string(repo)
         .with_context(|| format!("Invalid repository format: '{}'", repo))?;
     let mut query_builder = SearchQueryBuilder::new();
@@ -1632,12 +1653,16 @@ fn display_prs_by_mode(prs: &[PrInfo], cli: &Cli) -> Result<()> {
 
 /// Handles repository-wide PR search workflow using GitHub GraphQL streaming.
 async fn handle_repository_search(octocrab: &Octocrab, cli: &Cli) -> Result<()> {
-    let repo = cli
-        .repo
-        .as_ref()
-        .context("Repository (--repo) is required when no PR arguments are specified")?;
-
-    let search_query = build_search_query_from_cli(repo, cli)?;
+    let search_query = if cli.query.is_some() {
+        // For raw queries, we don't need a repo parameter
+        build_search_query_from_cli("", cli)?
+    } else {
+        let repo = cli
+            .repo
+            .as_ref()
+            .context("Repository (--repo) is required when no PR arguments are specified")?;
+        build_search_query_from_cli(repo, cli)?
+    };
     let (action_commands, all_prs) = process_prs_streaming(octocrab, &search_query, cli).await?;
 
     if has_action_commands(cli) {
