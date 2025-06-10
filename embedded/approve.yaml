@@ -1,6 +1,0 @@
-name: approve
-flag: approve
-description: "Generate /approve commands for PRs without 'approved' label"
-comment: "/approve"
-label: "approved"
-predicate: "skip_if_label_exists"

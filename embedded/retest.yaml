@@ -1,6 +1,0 @@
-name: retest
-flag: retest
-description: "Generate /retest commands to restart failing CI"
-comment: "/retest"
-label: ""
-predicate: ""

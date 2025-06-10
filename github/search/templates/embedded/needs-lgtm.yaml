@@ -1,4 +1,0 @@
-name: "Needs LGTM"
-flag: "needs-lgtm"
-description: "PRs missing LGTM"
-query: "-label:lgtm"

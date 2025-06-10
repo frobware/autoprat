@@ -1,5 +1,0 @@
-name: "Failing Check Filter"
-flag: "failing-check"
-description: "Filter by specific failing CI check name"
-parameterized: true
-query_template: "status:failure"

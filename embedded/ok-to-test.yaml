@@ -1,6 +1,0 @@
-name: ok-to-test
-flag: ok-to-test
-description: "Generate /ok-to-test commands for PRs with needs-ok-to-test label"
-comment: "/ok-to-test"
-label: "needs-ok-to-test"
-predicate: "only_if_label_exists"
