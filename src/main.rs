@@ -298,7 +298,7 @@ struct Cli {
     #[arg(short = 'a', long = "author")]
     author: Option<String>,
 
-    /// Has label (prefix ! to negate, can specify multiple)
+    /// Has label (prefix - to negate, can specify multiple)
     #[arg(long)]
     label: Vec<String>,
 
@@ -1588,7 +1588,7 @@ fn build_search_query_from_cli(repo: &str, cli: &Cli) -> Result<String> {
     }
 
     for label in &cli.label {
-        if let Some(label_name) = label.strip_prefix('!') {
+        if let Some(label_name) = label.strip_prefix('-') {
             query_builder.no_label(label_name);
         } else {
             query_builder.label(label);
