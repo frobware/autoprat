@@ -322,15 +322,15 @@ struct Cli {
     #[arg(long = "needs-ok-to-test")]
     needs_ok_to_test: bool,
 
-    /// Generate /approve commands
+    /// Generate /approve comments
     #[arg(long)]
     approve: bool,
 
-    /// Generate /lgtm commands
+    /// Generate /lgtm comments
     #[arg(long)]
     lgtm: bool,
 
-    /// Generate /ok-to-test commands
+    /// Generate /ok-to-test comments
     #[arg(long = "ok-to-test")]
     ok_to_test: bool,
 
@@ -338,7 +338,7 @@ struct Cli {
     #[arg(long)]
     close: bool,
 
-    /// Generate /retest commands
+    /// Generate /retest comments
     #[arg(long)]
     retest: bool,
 
