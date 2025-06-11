@@ -1,3 +1,5 @@
+use std::io::{self, IsTerminal};
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use chrono_humanize::HumanTime;
@@ -170,6 +172,15 @@ pub fn display_prs_table(prs: &[PrInfo]) -> Result<()> {
         "TITLE",
     ];
 
+    // Get terminal width only if stdout is a TTY
+    let terminal_width = if io::stdout().is_terminal() {
+        terminal_size::terminal_size()
+            .map(|(w, _)| w.0 as usize)
+            .unwrap_or(usize::MAX)
+    } else {
+        usize::MAX // No clamping when piping
+    };
+
     // Prepare all rows with truncated titles
     let mut rows: Vec<Vec<String>> = Vec::new();
 
@@ -197,7 +208,7 @@ pub fn display_prs_table(prs: &[PrInfo]) -> Result<()> {
             "N"
         };
 
-        // No need to truncate title since it's the last column
+        // Store title without truncation for now
         let title = pr.title.clone();
 
         rows.push(vec![
@@ -213,12 +224,45 @@ pub fn display_prs_table(prs: &[PrInfo]) -> Result<()> {
         ]);
     }
 
-    // Calculate column widths
+    // Calculate column widths (excluding title column initially)
     let mut widths = headers.iter().map(|h| h.len()).collect::<Vec<_>>();
 
     for row in &rows {
         for (i, cell) in row.iter().enumerate() {
             widths[i] = widths[i].max(cell.len());
+        }
+    }
+
+    // Calculate space used by all columns except title
+    // Each column separator is 2 spaces
+    let non_title_columns = headers.len() - 1;
+    let separator_width = 2 * (non_title_columns - 1);
+    let non_title_width: usize =
+        widths[..non_title_columns].iter().sum::<usize>() + separator_width;
+
+    // If we have a terminal width and non-title columns don't already exceed it
+    if terminal_width != usize::MAX && non_title_width < terminal_width {
+        // Calculate available space for title column
+        let available_title_width = terminal_width - non_title_width - 2; // -2 for separator before title
+
+        // Only clamp if we need to (some title exceeds available width)
+        let max_title_width = rows
+            .iter()
+            .map(|row| row[non_title_columns].len())
+            .max()
+            .unwrap_or(0);
+
+        if max_title_width > available_title_width && available_title_width > 3 {
+            // Update title column width to available width
+            widths[non_title_columns] = available_title_width;
+
+            // Truncate titles that are too long
+            for row in &mut rows {
+                let title = &row[non_title_columns];
+                if title.len() > available_title_width {
+                    row[non_title_columns] = format!("{}...", &title[..available_title_width - 3]);
+                }
+            }
         }
     }
 
