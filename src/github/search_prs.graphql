@@ -1,0 +1,53 @@
+query($query: String!, $after: String) {
+    search(query: $query, type: ISSUE, first: 100, after: $after) {
+        nodes {
+            ... on PullRequest {
+                number
+                title
+                url
+                state
+                createdAt
+                author {
+                    login
+                    __typename
+                }
+                labels(first: 20) {
+                    nodes {
+                        name
+                    }
+                }
+                statusCheckRollup {
+                    contexts(first: 100) {
+                        nodes {
+                            __typename
+                            ... on CheckRun {
+                                name
+                                conclusion
+                                detailsUrl
+                            }
+                            ... on StatusContext {
+                                context
+                                state
+                                targetUrl
+                            }
+                        }
+                    }
+                }
+                comments(last: 15) {
+                    nodes {
+                        body
+                        createdAt
+                        author {
+                            login
+                            __typename
+                        }
+                    }
+                }
+            }
+        }
+        pageInfo {
+            hasNextPage
+            endCursor
+        }
+    }
+}

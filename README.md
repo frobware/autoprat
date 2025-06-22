@@ -232,7 +232,23 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `-L, --limit <LIMIT>` - Limit the number of PRs to process [default: 30]
 
 ### Debugging
-- `--debug` - Enable debug logging
+Use the `RUST_LOG` environment variable for granular tracing:
+```bash
+# GitHub API operations only
+RUST_LOG=autoprat::github=debug autoprat -r repo
+
+# Error pattern matching and log analysis only  
+RUST_LOG=autoprat::log_fetcher=debug autoprat -r repo -D
+
+# Rate limiting and API quota tracking only
+RUST_LOG=autoprat::rate_limit=debug autoprat -r repo
+
+# All autoprat debugging
+RUST_LOG=autoprat=debug autoprat -r repo -D
+
+# Multiple categories
+RUST_LOG=autoprat::github=debug,autoprat::rate_limit=debug autoprat -r repo
+```
 
 ### Other
 - `-h, --help` - Print help
