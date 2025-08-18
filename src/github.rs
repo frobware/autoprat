@@ -54,7 +54,7 @@ async fn check_rate_limit(octocrab: &Octocrab, context: &str) -> Result<RateLimi
                     error = %e,
                     "Failed to check rate limit"
                 );
-                anyhow::anyhow!("Rate limit check failed: {}", e)
+                anyhow::anyhow!("Rate limit check failed: {e}")
             })?;
 
     let core_reset_time =
@@ -151,15 +151,15 @@ async fn execute_graphql_query(
         // Try to extract more specific error information.
         let error_msg = match &e {
             octocrab::Error::GitHub { source, .. } => {
-                format!("GitHub API error: {}", source)
+                format!("GitHub API error: {source}")
             }
             octocrab::Error::Serde { source, .. } => {
-                format!("JSON parsing error (likely rate limiting): {}", source)
+                format!("JSON parsing error (likely rate limiting): {source}")
             }
             octocrab::Error::Http { source, .. } => {
-                format!("HTTP error: {}", source)
+                format!("HTTP error: {source}")
             }
-            _ => format!("Unknown error: {}", e),
+            _ => format!("Unknown error: {e}"),
         };
 
         error!(
@@ -173,7 +173,7 @@ async fn execute_graphql_query(
             warn!("JSON parsing errors often indicate GitHub API rate limiting - check rate limit status above");
         }
 
-        anyhow::anyhow!("{}: {}", context, error_msg)
+        anyhow::anyhow!("{context}: {error_msg}")
     })
 }
 
@@ -262,8 +262,7 @@ where
             "NEUTRAL" => Ok(Conclusion::Neutral),
             "SKIPPED" => Ok(Conclusion::Skipped),
             unknown => Err(Error::custom(format!(
-                "Unknown GraphQL conclusion value: '{}'",
-                unknown
+                "Unknown GraphQL conclusion value: '{unknown}'"
             ))),
         })
         .transpose()?;
@@ -291,8 +290,7 @@ where
             "pending" => Ok(StatusState::Pending),
             "error" => Ok(StatusState::Error),
             unknown => Err(Error::custom(format!(
-                "Unknown GraphQL status state value: '{}'",
-                unknown
+                "Unknown GraphQL status state value: '{unknown}'"
             ))),
         })
         .transpose()?;
@@ -613,7 +611,7 @@ async fn fetch_single_pr_by_query(
 
     debug!(query_variables = ?query.get("variables"), "Executing single PR GraphQL query");
 
-    let context = format!("Single PR query for repo {} with '{}'", repo, search_query);
+    let context = format!("Single PR query for repo {repo} with '{search_query}'");
     let response = execute_graphql_query(octocrab, query, &context).await?;
 
     if let Some(graphql_pr) = response.data.search.nodes.into_iter().next() {
@@ -638,7 +636,7 @@ async fn collect_specific_prs(
     let mut all_prs = Vec::with_capacity(pr_identifiers.len());
 
     for (repo, number) in pr_identifiers {
-        let search_query = format!("repo:{} type:pr {}", repo, number);
+        let search_query = format!("repo:{repo} type:pr {number}");
 
         if let Some(pr_info) =
             fetch_single_pr_by_query(octocrab, &search_query, repo.clone()).await?
@@ -688,10 +686,7 @@ async fn fetch_prs_with_pagination(
 
         debug!(query_variables = ?query.get("variables"), "Executing GraphQL query");
 
-        let context = format!(
-            "Pagination query page {} for '{}'",
-            page_count, search_query
-        );
+        let context = format!("Pagination query page {page_count} for '{search_query}'");
         let response = match execute_graphql_query(octocrab, query, &context).await {
             Ok(response) => response,
             Err(e) => {

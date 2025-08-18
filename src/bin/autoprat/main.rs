@@ -8,11 +8,11 @@ fn handle_clap_help_version(clap_err: &clap::Error) -> ! {
     use clap::error::ErrorKind;
     match clap_err.kind() {
         ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
-            print!("{}", clap_err);
+            print!("{clap_err}");
             std::process::exit(0);
         }
         _ => {
-            eprint!("{}", clap_err);
+            eprint!("{clap_err}");
             std::process::exit(2);
         }
     }

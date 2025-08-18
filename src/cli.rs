@@ -206,9 +206,9 @@ multi_search_filter!(
     |names: &[String], terms: &mut Vec<String>| {
         for lbl in names {
             if let Some(neg) = lbl.strip_prefix('-') {
-                terms.push(format!("-label:{}", neg));
+                terms.push(format!("-label:{neg}"));
             } else {
-                terms.push(format!("label:{}", lbl));
+                terms.push(format!("label:{lbl}"));
             }
         }
     },
@@ -459,11 +459,11 @@ fn format_user_query(query: &str) -> Result<String> {
     let mut final_query = query.to_string();
 
     if !final_query.contains("is:pr") {
-        final_query = format!("{} is:pr", final_query);
+        final_query = format!("{final_query} is:pr");
     }
 
     if !final_query.contains("is:open") && !final_query.contains("is:closed") {
-        final_query = format!("{} is:open", final_query);
+        final_query = format!("{final_query} is:open");
     }
 
     Ok(final_query)
@@ -479,21 +479,21 @@ fn parse_throttle_duration(throttle_str: &str) -> Result<Duration> {
     if let Some(seconds_str) = throttle_str.strip_suffix('s') {
         let seconds: u64 = seconds_str
             .parse()
-            .with_context(|| format!("Invalid throttle seconds: '{}'", seconds_str))?;
+            .with_context(|| format!("Invalid throttle seconds: '{seconds_str}'"))?;
         return Ok(Duration::from_secs(seconds));
     }
 
     if let Some(minutes_str) = throttle_str.strip_suffix('m') {
         let minutes: u64 = minutes_str
             .parse()
-            .with_context(|| format!("Invalid throttle minutes: '{}'", minutes_str))?;
+            .with_context(|| format!("Invalid throttle minutes: '{minutes_str}'"))?;
         return Ok(Duration::from_secs(minutes * 60));
     }
 
     if let Some(hours_str) = throttle_str.strip_suffix('h') {
         let hours: u64 = hours_str
             .parse()
-            .with_context(|| format!("Invalid throttle hours: '{}'", hours_str))?;
+            .with_context(|| format!("Invalid throttle hours: '{hours_str}'"))?;
         return Ok(Duration::from_secs(hours * 3600));
     }
 
@@ -550,7 +550,7 @@ fn parse_pr_args_to_identifiers(repo: &Option<String>, prs: &[String]) -> Result
 
             let pr_number: u64 = pr
                 .parse()
-                .with_context(|| format!("Invalid PR number: '{}'", pr))?;
+                .with_context(|| format!("Invalid PR number: '{pr}'"))?;
 
             identifiers.push((repo_id, pr_number));
         }

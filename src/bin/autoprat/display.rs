@@ -91,9 +91,9 @@ fn format_error_logs<W: Write>(
     writer: &mut W,
 ) -> Result<()> {
     if !error_lines.is_empty() {
-        writeln!(writer, "{}Error logs:", log_prefix)?;
+        writeln!(writer, "{log_prefix}Error logs:")?;
         for log_line in error_lines {
-            writeln!(writer, "{}{}", log_prefix, log_line)?;
+            writeln!(writer, "{log_prefix}{log_line}")?;
         }
     }
     Ok(())
@@ -253,7 +253,7 @@ fn render_table_headers<W: Write>(
     for (i, header) in headers.iter().enumerate() {
         write!(writer, "{:<width$}", header, width = widths[i])?;
         if i < headers.len() - 1 {
-            write!(writer, "{}", COLUMN_SEPARATOR)?;
+            write!(writer, "{COLUMN_SEPARATOR}")?;
         }
     }
     writeln!(writer)?;
@@ -264,7 +264,7 @@ fn render_table_separator<W: Write>(widths: &[usize], writer: &mut W) -> Result<
     for (i, &width) in widths.iter().enumerate() {
         write!(writer, "{}", "-".repeat(width))?;
         if i < widths.len() - 1 {
-            write!(writer, "{}", COLUMN_SEPARATOR)?;
+            write!(writer, "{COLUMN_SEPARATOR}")?;
         }
     }
     writeln!(writer)?;
@@ -280,7 +280,7 @@ fn render_table_rows<W: Write>(
         for (i, cell) in row.iter().enumerate() {
             write!(writer, "{:<width$}", cell, width = widths[i])?;
             if i < row.len() - 1 {
-                write!(writer, "{}", COLUMN_SEPARATOR)?;
+                write!(writer, "{COLUMN_SEPARATOR}")?;
             }
         }
         writeln!(writer)?;
@@ -316,7 +316,7 @@ fn group_prs_by_repository(prs: &[PullRequest]) -> HashMap<String, Vec<&PullRequ
 }
 
 fn display_repository_header<W: Write>(repo_name: &str, writer: &mut W) -> Result<()> {
-    writeln!(writer, "Repository: {}", repo_name)?;
+    writeln!(writer, "Repository: {repo_name}")?;
     writeln!(writer, "=====================================")?;
     Ok(())
 }
@@ -447,7 +447,7 @@ impl<'a> PrDetailFormatter<'a> {
                 } else {
                     "│ ├─"
                 };
-                writeln!(writer, "{}{}", prefix, label)?;
+                writeln!(writer, "{prefix}{label}")?;
             }
         }
 
@@ -560,7 +560,7 @@ fn display_individual_check<W: Write>(
     writeln!(writer, "{}{}", check_prefix, check.name)?;
 
     if let Some(url) = &check.url {
-        writeln!(writer, "{}URL: {}", url_prefix, url)?;
+        writeln!(writer, "{url_prefix}URL: {url}")?;
 
         if show_logs && check.is_failed() {
             display_pre_fetched_error_logs(error_logs, pr_number, &check.name, log_prefix, writer)?;
@@ -636,7 +636,7 @@ fn display_checks_tree<W: Write>(
 pub fn output_shell_commands<W: Write>(actions: &[Task], writer: &mut W) -> Result<()> {
     for action in actions {
         let command = format_shell_command(action.action.as_ref(), &action.pr_info);
-        writeln!(writer, "{}", command)?;
+        writeln!(writer, "{command}")?;
     }
     Ok(())
 }
@@ -670,7 +670,7 @@ pub async fn display_pr_table<W: Write + Send>(
         let mut error_logs: HashMap<u64, HashMap<CheckName, Vec<String>>> = HashMap::new();
         for pr_result in &pr_results {
             for fetch_error in &pr_result.fetch_errors {
-                writeln!(writer, "Warning: Failed to fetch logs for {}", fetch_error)?;
+                writeln!(writer, "Warning: Failed to fetch logs for {fetch_error}")?;
             }
 
             if !pr_result.logs.is_empty() {

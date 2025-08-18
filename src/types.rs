@@ -29,7 +29,7 @@ pub enum LogUrlError {
 impl std::fmt::Display for LogUrlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LogUrlError::InvalidUrl(msg) => write!(f, "Invalid log URL: {}", msg),
+            LogUrlError::InvalidUrl(msg) => write!(f, "Invalid log URL: {msg}"),
         }
     }
 }
@@ -215,7 +215,7 @@ impl Repo {
         use anyhow::Context;
 
         let url =
-            Url::parse(url_str).with_context(|| format!("Failed to parse URL: '{}'", url_str))?;
+            Url::parse(url_str).with_context(|| format!("Failed to parse URL: '{url_str}'"))?;
 
         let path_segments: Vec<&str> = url
             .path_segments()
@@ -277,7 +277,7 @@ impl Repo {
     ) -> String {
         let mut parts = Vec::with_capacity(search_filters.len() + 3); // Base terms plus filters.
 
-        parts.push(format!("repo:{}", self));
+        parts.push(format!("repo:{self}"));
 
         for sf in search_filters {
             sf.apply(&mut parts);
@@ -389,9 +389,9 @@ impl PullRequest {
     pub fn matches_author(&self, author: &str) -> bool {
         self.author_login == author
             || self.author_search_format == author
-            || (self.author_login.starts_with(&format!("{}[", author))
+            || (self.author_login.starts_with(&format!("{author}["))
                 && self.author_login.ends_with("]"))
-            || (self.author_search_format == format!("app/{}", author))
+            || (self.author_search_format == format!("app/{author}"))
     }
 
     pub fn has_failing_ci(&self) -> bool {
