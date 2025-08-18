@@ -252,12 +252,10 @@ impl Repo {
             if let Some(index) = path_segments
                 .iter()
                 .position(|&segment| segment == *keyword)
+                && index + 1 < path_segments.len()
+                && let Ok(number) = path_segments[index + 1].parse::<u64>()
             {
-                if index + 1 < path_segments.len() {
-                    if let Ok(number) = path_segments[index + 1].parse::<u64>() {
-                        return Some(number);
-                    }
-                }
+                return Some(number);
             }
         }
         None

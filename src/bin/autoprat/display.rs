@@ -235,11 +235,11 @@ fn apply_title_truncation(rows: &mut [Vec<String>], widths: &mut [usize], termin
         widths[TITLE_COLUMN_INDEX] = available_title_width;
 
         for row in rows {
-            if let Some(title) = row.get_mut(TITLE_COLUMN_INDEX) {
-                if title.len() > available_title_width {
-                    let truncate_at = available_title_width - TITLE_TRUNCATION_SUFFIX.len();
-                    *title = format!("{}{}", &title[..truncate_at], TITLE_TRUNCATION_SUFFIX);
-                }
+            if let Some(title) = row.get_mut(TITLE_COLUMN_INDEX)
+                && title.len() > available_title_width
+            {
+                let truncate_at = available_title_width - TITLE_TRUNCATION_SUFFIX.len();
+                *title = format!("{}{}", &title[..truncate_at], TITLE_TRUNCATION_SUFFIX);
             }
         }
     }
@@ -536,12 +536,11 @@ fn display_pre_fetched_error_logs<W: Write>(
     log_prefix: &str,
     writer: &mut W,
 ) -> Result<()> {
-    if let Some(logs) = error_logs {
-        if let Some(pr_logs) = logs.get(&pr_number) {
-            if let Some(error_lines) = pr_logs.get(check_name) {
-                format_error_logs(error_lines, log_prefix, writer)?;
-            }
-        }
+    if let Some(logs) = error_logs
+        && let Some(pr_logs) = logs.get(&pr_number)
+        && let Some(error_lines) = pr_logs.get(check_name)
+    {
+        format_error_logs(error_lines, log_prefix, writer)?;
     }
     Ok(())
 }

@@ -41,6 +41,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
+    - name: Show tool versions
+      run: |
+        rustc --version
+        cargo --version
+        cargo clippy --version
+        cargo +nightly --version
+        rustfmt +nightly --version
+
     - name: Check formatting
       run: make fmt-check
 

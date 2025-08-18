@@ -288,17 +288,16 @@ impl LogFetcher {
 
         for pr_result in pr_results.values() {
             for check in &pr_result.pr.checks {
-                if check.is_failed() {
-                    if let Some(url) = &check.url {
-                        if let Some(log_url) = self.ci_url_to_log_url(url) {
-                            urls_to_fetch.push((
-                                pr_result.pr.number,
-                                check.name.clone(),
-                                url.clone(),
-                                log_url,
-                            ));
-                        }
-                    }
+                if check.is_failed()
+                    && let Some(url) = &check.url
+                    && let Some(log_url) = self.ci_url_to_log_url(url)
+                {
+                    urls_to_fetch.push((
+                        pr_result.pr.number,
+                        check.name.clone(),
+                        url.clone(),
+                        log_url,
+                    ));
                 }
             }
         }
