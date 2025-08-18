@@ -317,8 +317,13 @@ struct CliArgs {
     /// PR-NUMBER|PR-URL ...
     pub prs: Vec<String>,
 
-    /// Exclude specific PRs from processing (can specify multiple)
-    #[arg(short = 'E', long = "exclude", value_name = "PR-NUMBER|PR-URL")]
+    /// Exclude specific PRs from processing (can specify multiple or comma-separated)
+    #[arg(
+        short = 'E',
+        long = "exclude",
+        value_name = "PR-NUMBER|PR-URL",
+        value_delimiter = ','
+    )]
     pub exclude: Vec<String>,
 
     /// Raw GitHub search query (mutually exclusive with filter options)
@@ -527,6 +532,10 @@ fn parse_pr_args_to_identifiers(repo: &Option<String>, prs: &[String]) -> Result
     let mut identifiers = Vec::new();
 
     for pr in prs {
+        let pr = pr.trim(); // Trim whitespace from each value
+        if pr.is_empty() {
+            continue; // Skip empty strings silently (no-op)
+        }
         if pr.starts_with("https://") {
             let (repo, pr_number) = Repo::parse_url(pr)?;
             let pr_number = pr_number

@@ -44,6 +44,10 @@ autoprat -r your-org/your-repo --needs-approve --needs-lgtm
 autoprat -r your-org/your-repo --detailed 123 456
 autoprat --detailed https://github.com/your-org/your-repo/pull/123
 
+# Exclude specific PRs from processing.
+autoprat -r your-org/your-repo --needs-approve --exclude 123,456 --approve
+autoprat -r your-org/your-repo --exclude https://github.com/your-org/your-repo/pull/789 --lgtm
+
 # Monitor PRs across multiple repositories.
 autoprat --detailed https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456
 
@@ -86,8 +90,9 @@ autoprat -r myorg/myrepo --failing-ci --retest | sh
 autoprat -r myorg/myrepo --failing-check "ci/test-flaky" \
   --comment "/override ci/test-flaky" | sh
 
-# Close stale PRs with failing CI.
-autoprat -r myorg/myrepo --failing-ci --author "external-contributor" --close | sh
+# Close stale PRs with failing CI, excluding specific ones.
+autoprat -r myorg/myrepo --failing-ci --author "external-contributor" \
+  --exclude 123,456 --close | sh
 ```
 
 ### Advanced Filtering
@@ -98,8 +103,8 @@ autoprat -r myorg/myrepo --needs-lgtm --author "dependabot"
 # High priority bugs without holds.
 autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "-do-not-merge/hold"
 
-# PRs missing approval from specific author.
-autoprat -r myorg/myrepo --author "trusted-contributor" --needs-approve
+# PRs missing approval from specific author, excluding some.
+autoprat -r myorg/myrepo --author "trusted-contributor" --needs-approve --exclude 789
 
 # Raw GitHub search queries for complex filtering.
 # Note: 'is:pr' and 'is:open' are automatically added if not present
@@ -206,6 +211,14 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
   - Mixed: `123 https://github.com/owner/repo/pull/456` (requires `--repo` for numeric args)
   - Multi-repo: `https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456`
 
+### Exclusions
+- `-E, --exclude <PR>` - Exclude specific PRs from processing (can specify multiple or comma-separated)
+  - Numbers: `--exclude 123,456` (requires `--repo`)
+  - URLs: `--exclude https://github.com/owner/repo/pull/123`
+  - Mixed: `--exclude 123 --exclude https://github.com/owner/repo/pull/456`
+  - Spaces friendly: `--exclude "123, 456"` (automatically trimmed)
+  - Empty values ignored: `--exclude ""` or `--exclude "123,,"` (trailing commas OK)
+
 ### Filters (combine with AND logic)
 - `-a, --author <AUTHOR>` - Exact author match
 - `--label <LABEL>` - Has label (prefix `-` to negate, can specify multiple)
@@ -237,7 +250,7 @@ Use the `RUST_LOG` environment variable for granular tracing:
 # GitHub API operations only
 RUST_LOG=autoprat::github=debug autoprat -r repo
 
-# Error pattern matching and log analysis only  
+# Error pattern matching and log analysis only
 RUST_LOG=autoprat::log_fetcher=debug autoprat -r repo -D
 
 # Rate limiting and API quota tracking only
@@ -281,10 +294,11 @@ cp target/release/autoprat ~/.local/bin/autoprat
 2. **Review before executing** - Always check generated commands first
 3. **Focus on specific PRs** - Add PR numbers or URLs as arguments: `autoprat -r repo -d 123 456` or `autoprat -d https://github.com/owner/repo/pull/123`
    **Multi-repository** - Monitor PRs across repositories: `autoprat -d https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456`
-4. **Use throttling** - Prevent spam with `--throttle` in automated workflows
-5. **Combine filters** - Multiple filters use AND logic for precise targeting
-6. **Exact check names** - Use `--failing-check` with exact CI check names for safety
-7. **Script the common cases** - Save frequent filter combinations as shell aliases
+4. **Exclude problematic PRs** - Use `--exclude` to skip specific PRs: `autoprat -r repo --approve --exclude 123,456`
+5. **Use throttling** - Prevent spam with `--throttle` in automated workflows
+6. **Combine filters** - Multiple filters use AND logic for precise targeting
+7. **Exact check names** - Use `--failing-check` with exact CI check names for safety
+8. **Script the common cases** - Save frequent filter combinations as shell aliases
 
 ## License
 

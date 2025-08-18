@@ -2960,7 +2960,7 @@ async fn test_exclude_pr_by_number() {
     let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
     assert!(!pr_numbers.contains(&123));
     assert!(!pr_numbers.contains(&125));
-    
+
     // Should still contain other PRs
     assert!(pr_numbers.contains(&124));
     assert!(pr_numbers.contains(&126));
@@ -2999,7 +2999,7 @@ async fn test_exclude_pr_by_url() {
     // Should exclude PR 124 from filtered results
     let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
     assert!(!pr_numbers.contains(&124));
-    
+
     // Should still contain other PRs
     assert!(pr_numbers.contains(&123));
     assert!(pr_numbers.contains(&125));
@@ -3041,7 +3041,7 @@ async fn test_exclude_mixed_numbers_and_urls() {
     let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
     assert!(!pr_numbers.contains(&123));
     assert!(!pr_numbers.contains(&126));
-    
+
     // Should still contain other PRs
     assert!(pr_numbers.contains(&124));
     assert!(pr_numbers.contains(&125));
@@ -3096,8 +3096,277 @@ async fn test_exclude_validation_requires_repo() {
         &provider,
     )
     .await;
-    
+
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
     assert!(error_msg.contains("--repo is required when using exclude PR numbers"));
+}
+
+#[tokio::test]
+async fn test_exclude_empty_string() {
+    // Test: --exclude with empty string should be a no-op (user-friendly)
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "", // Empty string should be no-op
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+
+    assert!(result.is_ok());
+
+    // Should behave exactly like no --exclude flag
+    let result = result.unwrap();
+    // Should have all PRs (none excluded)
+    assert_eq!(result.filtered_prs.len(), 9); // All mock PRs present
+
+    // Test multiple empty values (should all be skipped)
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "123,,124,,", // Double commas create empty values
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&123));
+    assert!(!pr_numbers.contains(&124));
+}
+
+#[tokio::test]
+async fn test_exclude_comma_separated_numbers() {
+    // Test: --exclude with comma-separated PR numbers
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "123,125,127", // Comma-separated numbers
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // Should exclude PRs 123, 125, and 127 from filtered results
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&123));
+    assert!(!pr_numbers.contains(&125));
+    assert!(!pr_numbers.contains(&127));
+
+    // Should still contain other PRs
+    assert!(pr_numbers.contains(&124));
+    assert!(pr_numbers.contains(&126));
+    assert!(pr_numbers.contains(&128));
+
+    // Should have no actions for excluded PRs
+    let excluded_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| {
+            let pr_num = action.pr_info.number;
+            pr_num == 123 || pr_num == 125 || pr_num == 127
+        })
+        .count();
+    assert_eq!(excluded_actions, 0);
+}
+
+#[tokio::test]
+async fn test_exclude_comma_separated_urls() {
+    // Test: --exclude with comma-separated PR URLs
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "https://github.com/owner/repo/pull/124,https://github.com/owner/repo/pull/128", // Comma-separated URLs
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // Should exclude PRs 124 and 128 from filtered results
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&124));
+    assert!(!pr_numbers.contains(&128));
+
+    // Should still contain other PRs
+    assert!(pr_numbers.contains(&123));
+    assert!(pr_numbers.contains(&125));
+    assert!(pr_numbers.contains(&126));
+}
+
+#[tokio::test]
+async fn test_exclude_mixed_comma_and_multiple_flags() {
+    // Test: --exclude with mix of comma-separated and multiple flags
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "123,124", // Comma-separated
+            "--exclude",
+            "126", // Separate flag
+            "--exclude",
+            "https://github.com/owner/repo/pull/128", // URL
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // Should exclude PRs 123, 124, 126, and 128
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&123));
+    assert!(!pr_numbers.contains(&124));
+    assert!(!pr_numbers.contains(&126));
+    assert!(!pr_numbers.contains(&128));
+
+    // Should still contain other PRs
+    assert!(pr_numbers.contains(&125));
+    assert!(pr_numbers.contains(&127));
+}
+
+#[tokio::test]
+async fn test_exclude_comma_separated_edge_cases() {
+    // Test: edge cases with comma-separated values
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    // Test with trailing comma (should work now - empty strings are skipped)
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "123,124,", // Trailing comma creates empty value which is skipped
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&123));
+    assert!(!pr_numbers.contains(&124));
+
+    // Test with leading/trailing spaces around entire values
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            " 126 , 127 ", // Spaces around entire values
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&126));
+    assert!(!pr_numbers.contains(&127));
+
+    // Test with single comma-separated value (should work)
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "123", // Single value, no comma
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&123));
+
+    // Test with spaces around commas (should work now with trimming)
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "124, 125", // Spaces around comma should work with trimming
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&124));
+    assert!(!pr_numbers.contains(&125));
+
+    // Test without spaces (should work)
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "124,125", // No spaces around comma
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&124));
+    assert!(!pr_numbers.contains(&125));
 }
