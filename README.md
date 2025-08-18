@@ -271,7 +271,8 @@ RUST_LOG=autoprat::github=debug,autoprat::rate_limit=debug autoprat -r repo
 
 ### Prerequisites
 - [GitHub CLI (`gh`)](https://cli.github.com/) installed and authenticated
-- Rust 1.70+ (if building from source)
+- Rust 1.76+ (if building from source)
+- Rust 1.89+ (if running clippy locally to match CI)
 
 ### Install
 ```bash
