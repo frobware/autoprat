@@ -431,6 +431,16 @@ impl PullRequest {
     }
 
     pub fn matches_request(&self, request: &QuerySpec) -> bool {
+        // Check if this PR is explicitly excluded
+        let is_excluded = request
+            .exclude
+            .iter()
+            .any(|(repo, number)| self.matches_repo_and_number(repo, *number));
+
+        if is_excluded {
+            return false;
+        }
+
         (request.prs.is_empty()
             || request
                 .prs
@@ -508,6 +518,7 @@ pub trait Forge {
 pub struct QuerySpec {
     pub repo: Option<Repo>,
     pub prs: Vec<(Repo, u64)>,
+    pub exclude: Vec<(Repo, u64)>,
     pub query: Option<String>,
     pub limit: usize,
     pub search_filters: Vec<Box<dyn SearchFilter + Send + Sync>>,

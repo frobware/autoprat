@@ -317,6 +317,10 @@ struct CliArgs {
     /// PR-NUMBER|PR-URL ...
     pub prs: Vec<String>,
 
+    /// Exclude specific PRs from processing (can specify multiple)
+    #[arg(short = 'E', long = "exclude", value_name = "PR-NUMBER|PR-URL")]
+    pub exclude: Vec<String>,
+
     /// Raw GitHub search query (mutually exclusive with filter options)
     #[arg(long, value_name = "SEARCH-QUERY")]
     pub query: Option<String>,
@@ -371,6 +375,13 @@ impl CliArgs {
             let has_pr_numbers = self.prs.iter().any(|pr| !pr.starts_with("https://"));
             if has_pr_numbers {
                 anyhow::bail!("--repo is required when using PR numbers (not URLs)");
+            }
+        }
+
+        if !self.exclude.is_empty() && self.repo.is_none() {
+            let has_pr_numbers = self.exclude.iter().any(|pr| !pr.starts_with("https://"));
+            if has_pr_numbers {
+                anyhow::bail!("--repo is required when using exclude PR numbers (not URLs)");
             }
         }
 
@@ -560,7 +571,9 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
         .transpose()?;
 
     validate_pr_urls_against_repo(cli.repo.as_deref(), &cli.prs)?;
+    validate_pr_urls_against_repo(cli.repo.as_deref(), &cli.exclude)?;
     let pr_identifiers = parse_pr_args_to_identifiers(&cli.repo, &cli.prs)?;
+    let exclude_identifiers = parse_pr_args_to_identifiers(&cli.repo, &cli.exclude)?;
 
     let query = cli
         .query
@@ -578,6 +591,7 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
     Ok(QuerySpec {
         repo,
         prs: pr_identifiers,
+        exclude: exclude_identifiers,
         query,
         limit: cli.limit,
         search_filters: cli_to_search_filters(&cli.filters),

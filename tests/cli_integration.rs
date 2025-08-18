@@ -2931,3 +2931,173 @@ async fn test_multi_repository_urls_with_actions() {
     assert_eq!(action.pr_info.number, 100);
     assert_eq!(action.action.get_comment_body(), Some("/approve"));
 }
+
+#[tokio::test]
+async fn test_exclude_pr_by_number() {
+    // Test: --exclude with PR numbers should filter out specific PRs
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "123",
+            "--exclude",
+            "125",
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // Should exclude PRs 123 and 125 from filtered results
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&123));
+    assert!(!pr_numbers.contains(&125));
+    
+    // Should still contain other PRs
+    assert!(pr_numbers.contains(&124));
+    assert!(pr_numbers.contains(&126));
+
+    // Should have no actions for excluded PRs
+    let excluded_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123 || action.pr_info.number == 125)
+        .count();
+    assert_eq!(excluded_actions, 0);
+}
+
+#[tokio::test]
+async fn test_exclude_pr_by_url() {
+    // Test: --exclude with PR URLs should filter out specific PRs
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "https://github.com/owner/repo/pull/124",
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // Should exclude PR 124 from filtered results
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&124));
+    
+    // Should still contain other PRs
+    assert!(pr_numbers.contains(&123));
+    assert!(pr_numbers.contains(&125));
+
+    // Should have no actions for excluded PR
+    let excluded_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 124)
+        .count();
+    assert_eq!(excluded_actions, 0);
+}
+
+#[tokio::test]
+async fn test_exclude_mixed_numbers_and_urls() {
+    // Test: --exclude with mix of numbers and URLs
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "123", // By number
+            "--exclude",
+            "https://github.com/owner/repo/pull/126", // By URL
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // Should exclude both PRs 123 and 126
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(!pr_numbers.contains(&123));
+    assert!(!pr_numbers.contains(&126));
+    
+    // Should still contain other PRs
+    assert!(pr_numbers.contains(&124));
+    assert!(pr_numbers.contains(&125));
+}
+
+#[tokio::test]
+async fn test_exclude_with_specific_pr_list() {
+    // Test: --exclude works when targeting specific PRs
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "123", // Target PR 123
+            "124", // Target PR 124
+            "125", // Target PR 125
+            "--exclude",
+            "124", // But exclude PR 124
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // Should only have PRs 123 and 125 (124 is excluded)
+    assert_eq!(result.filtered_prs.len(), 2);
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(pr_numbers.contains(&123));
+    assert!(pr_numbers.contains(&125));
+    assert!(!pr_numbers.contains(&124));
+}
+
+#[tokio::test]
+async fn test_exclude_validation_requires_repo() {
+    // Test: --exclude with PR numbers requires --repo
+    let provider = MockHub::new(vec![]);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--query",
+            "is:pr",
+            "--exclude",
+            "123", // Number without --repo should fail
+        ],
+        &provider,
+    )
+    .await;
+    
+    assert!(result.is_err());
+    let error_msg = result.unwrap_err().to_string();
+    assert!(error_msg.contains("--repo is required when using exclude PR numbers"));
+}
