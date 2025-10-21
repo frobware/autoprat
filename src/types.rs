@@ -440,6 +440,48 @@ impl PullRequest {
         })
     }
 
+    /// Checks if a comment with the given body was posted recently in history.
+    ///
+    /// Returns true only if the comment exists within BOTH:
+    /// - The last N most recent comments (position-based), AND
+    /// - Within the specified duration (time-based)
+    ///
+    /// This prevents re-posting commands when GitHub is slow to apply labels,
+    /// whilst allowing re-posting when:
+    /// - The comment is older than the specified duration (likely a stale state)
+    /// - The comment has been pushed out by newer comments
+    /// - Labels were removed due to new commits
+    ///
+    /// # Arguments
+    ///
+    /// * `comment_body` - The comment text to search for
+    /// * `max_comments_to_check` - Maximum number of recent comments to examine
+    /// * `max_age` - Maximum age of comments to consider
+    pub fn was_comment_posted_in_history(
+        &self,
+        comment_body: &str,
+        max_comments_to_check: usize,
+        max_age: Duration,
+    ) -> bool {
+        use chrono::Utc;
+
+        let target_command = comment_body.trim();
+        let now = Utc::now();
+        let cutoff_time = now - chrono::Duration::seconds(max_age.as_secs() as i64);
+
+        self.recent_comments
+            .iter()
+            .rev() // Start from most recent
+            .take(max_comments_to_check)
+            .any(|comment| {
+                comment.created_at > cutoff_time
+                    && comment
+                        .body
+                        .lines()
+                        .any(|line| line.trim() == target_command)
+            })
+    }
+
     pub fn matches_request(&self, request: &QuerySpec) -> bool {
         // Check if this PR is explicitly excluded
         let is_excluded = request
@@ -536,6 +578,8 @@ pub struct QuerySpec {
     pub actions: Vec<Box<dyn Action + Send + Sync>>,
     pub custom_comments: Vec<String>,
     pub throttle: Option<Duration>,
+    pub history_max_age: Duration,
+    pub history_max_comments: usize,
     pub truncate_titles: bool,
 }
 

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::{
     cli::CommentAction,
     types::{Action, Forge, PullRequest, QueryResult, QuerySpec, Task},
@@ -21,12 +19,7 @@ where
         .filter(|pr| pr.matches_request(request))
         .collect();
 
-    let executable_actions = generate_executable_actions(
-        &filtered_prs,
-        &request.actions,
-        &request.custom_comments,
-        &request.throttle,
-    );
+    let executable_actions = generate_executable_actions(&filtered_prs, request);
 
     Ok(QueryResult {
         filtered_prs,
@@ -34,24 +27,29 @@ where
     })
 }
 
-fn generate_executable_actions(
-    filtered_prs: &[PullRequest],
-    actions: &[Box<dyn Action + Send + Sync>],
-    custom_comments: &[String],
-    throttle: &Option<Duration>,
-) -> Vec<Task> {
-    let mut executable_actions =
-        Vec::with_capacity(filtered_prs.len() * (actions.len() + custom_comments.len()));
+fn generate_executable_actions(filtered_prs: &[PullRequest], request: &QuerySpec) -> Vec<Task> {
+    let mut executable_actions = Vec::with_capacity(
+        filtered_prs.len() * (request.actions.len() + request.custom_comments.len()),
+    );
 
     for pr in filtered_prs {
-        for action in actions {
+        for action in &request.actions {
             if action.only_if(pr) {
                 if let Some(body) = action.get_comment_body() {
-                    // When there's no throttling, we're permissive
-                    // and allow all actions. When throttling is
-                    // enabled, we're restrictive and only allow
-                    // actions we haven't done recently.
-                    if throttle
+                    // For idempotent actions, check if we've already posted
+                    // this comment in the recent history. This prevents
+                    // re-posting commands when GitHub is slow to apply labels.
+                    if pr.was_comment_posted_in_history(
+                        body,
+                        request.history_max_comments,
+                        request.history_max_age,
+                    ) {
+                        continue;
+                    }
+
+                    // Additionally apply throttle check if enabled.
+                    if request
+                        .throttle
                         .is_none_or(|duration| !pr.was_comment_posted_recently(body, duration))
                     {
                         executable_actions.push(Task {
@@ -68,8 +66,20 @@ fn generate_executable_actions(
             }
         }
 
-        for comment in custom_comments {
-            if throttle.is_none_or(|duration| !pr.was_comment_posted_recently(comment, duration)) {
+        for comment in &request.custom_comments {
+            // For custom comments, also check history first.
+            if pr.was_comment_posted_in_history(
+                comment,
+                request.history_max_comments,
+                request.history_max_age,
+            ) {
+                continue;
+            }
+
+            if request
+                .throttle
+                .is_none_or(|duration| !pr.was_comment_posted_recently(comment, duration))
+            {
                 let custom_action = CommentAction::new(comment.clone());
                 if custom_action.only_if(pr) {
                     executable_actions.push(Task {

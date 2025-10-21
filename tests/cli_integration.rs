@@ -1172,6 +1172,439 @@ async fn test_custom_comment_throttling_seconds() {
 }
 
 #[tokio::test]
+async fn test_idempotent_action_comment_history_check() {
+    // Test: idempotent actions (like /lgtm) should check comment history
+    // even without throttling to avoid re-posting when GitHub is slow
+    let mut mock_data = create_mock_github_data();
+
+    // Add /lgtm comment to PR 123 from 10 minutes ago
+    // Even though this is old, we should not re-post because we've already done it
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "/lgtm".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(10),
+    });
+
+    // Remove the lgtm label to simulate GitHub being slow
+    mock_data[0].labels.retain(|l| l != "lgtm");
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--lgtm",
+            // No throttle specified
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 should NOT have an lgtm action because we already posted /lgtm
+    // even though the label isn't present yet
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(pr_123_actions, 0);
+
+    // Other PRs without lgtm label should have the action
+    let other_prs_needing_lgtm = result
+        .executable_actions
+        .iter()
+        .filter(|action| !action.pr_info.has_label("lgtm"))
+        .count();
+    assert!(other_prs_needing_lgtm > 0);
+}
+
+#[tokio::test]
+async fn test_idempotent_action_approve_comment_history() {
+    // Test: /approve should also check comment history
+    let mut mock_data = create_mock_github_data();
+
+    // Add /approve comment to PR 123 from 15 minutes ago
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "/approve".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(15),
+    });
+
+    // Remove the approved label to simulate GitHub being slow
+    mock_data[0].labels.retain(|l| l != "approved");
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--approve"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 should NOT have an approve action
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(pr_123_actions, 0);
+}
+
+#[tokio::test]
+async fn test_custom_comment_history_check() {
+    // Test: custom comments should also check history, not just throttle
+    let mut mock_data = create_mock_github_data();
+
+    // Add a custom comment from 20 minutes ago
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "Please review carefully".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(20),
+    });
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--comment",
+            "Please review carefully",
+            // No throttle - should still skip because comment exists in history
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // Should have 8 custom comment actions (9 PRs - 1 with comment in history)
+    assert_eq!(result.executable_actions.len(), 8);
+
+    // Verify that PR 123 is NOT in the executable actions
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(pr_123_actions, 0);
+}
+
+#[tokio::test]
+async fn test_history_check_with_throttle_both_apply() {
+    // Test: both history check and throttle should be applied
+    // History check happens first, but if comment is recent, throttle prevents it too
+    let mut mock_data = create_mock_github_data();
+
+    // Add /lgtm comment to PR 123 from 2 minutes ago
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "/lgtm".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(2),
+    });
+
+    // Remove the lgtm label
+    mock_data[0].labels.retain(|l| l != "lgtm");
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--lgtm",
+            "--throttle",
+            "5m",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 should be skipped due to history check (would also be caught by throttle)
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(pr_123_actions, 0);
+}
+
+#[tokio::test]
+async fn test_history_check_multiline_comment() {
+    // Test: history check should work with multiline comments
+    let mut mock_data = create_mock_github_data();
+
+    // Add a comment with /lgtm on a separate line
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "This looks good!\n/lgtm\nThanks for the fix!".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(10),
+    });
+
+    // Remove the lgtm label
+    mock_data[0].labels.retain(|l| l != "lgtm");
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--lgtm"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 should be skipped because /lgtm exists in comment history
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(pr_123_actions, 0);
+}
+
+#[tokio::test]
+async fn test_label_removed_after_comment_posted() {
+    // Test: if label existed, then was removed (e.g., new commit pushed),
+    // we should be able to re-post the command even if it's in comment history
+    let mut mock_data = create_mock_github_data();
+
+    // Simulate: we posted /lgtm, label was applied, then removed
+    // Comment is old (from before the label was removed)
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "/lgtm".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(30),
+    });
+
+    // Label is NOT present (was removed)
+    mock_data[0].labels.retain(|l| l != "lgtm");
+
+    // Add some comments after the /lgtm to simulate activity
+    for i in 1..=11 {
+        mock_data[0].recent_comments.push(CommentInfo {
+            body: format!("Some other comment {}", i),
+            created_at: Utc::now() - chrono::Duration::minutes(30 - i),
+        });
+    }
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--lgtm"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 SHOULD have an lgtm action because:
+    // 1. Label doesn't exist (was removed)
+    // 2. The /lgtm comment is beyond the last 10 comments (pushed out by newer comments)
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(
+        pr_123_actions, 1,
+        "Should allow re-posting /lgtm after label was removed and comment is no longer in recent history"
+    );
+}
+
+#[tokio::test]
+async fn test_history_check_1_hour_threshold() {
+    // Test: comments older than 1 hour should not block re-posting
+    let mut mock_data = create_mock_github_data();
+
+    // Add /lgtm comment from 2 hours ago (beyond 1-hour threshold)
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "/lgtm".to_string(),
+        created_at: Utc::now() - chrono::Duration::hours(2),
+    });
+
+    // Remove the lgtm label
+    mock_data[0].labels.retain(|l| l != "lgtm");
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--lgtm"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 SHOULD have an lgtm action because the comment is older than 1 hour
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(
+        pr_123_actions, 1,
+        "Should allow re-posting /lgtm when comment is older than 1 hour"
+    );
+}
+
+#[tokio::test]
+async fn test_history_check_within_1_hour_and_recent_position() {
+    // Test: comments within 1 hour AND within last 10 comments should block re-posting
+    let mut mock_data = create_mock_github_data();
+
+    // Add /lgtm comment from 30 minutes ago (within 1-hour threshold)
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "/lgtm".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(30),
+    });
+
+    // Add a few more comments (but not enough to push /lgtm out of last 10)
+    for i in 1..=5 {
+        mock_data[0].recent_comments.push(CommentInfo {
+            body: format!("Comment {}", i),
+            created_at: Utc::now() - chrono::Duration::minutes(25),
+        });
+    }
+
+    // Remove the lgtm label
+    mock_data[0].labels.retain(|l| l != "lgtm");
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--lgtm"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 should NOT have an lgtm action because:
+    // - Comment is within 1 hour
+    // - Comment is within last 10 comments
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(
+        pr_123_actions, 0,
+        "Should block re-posting /lgtm when comment is recent (< 1h) and within last 10 comments"
+    );
+}
+
+#[tokio::test]
+async fn test_history_check_custom_max_age() {
+    // Test: custom --history-max-age flag should be respected
+    let mut mock_data = create_mock_github_data();
+
+    // Add /lgtm comment from 45 minutes ago
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "/lgtm".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(45),
+    });
+
+    // Remove the lgtm label
+    mock_data[0].labels.retain(|l| l != "lgtm");
+
+    let provider = MockHub::new(mock_data);
+
+    // With custom --history-max-age 30m, comment at 45min should allow re-posting
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--lgtm",
+            "--history-max-age",
+            "30m",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 SHOULD have an lgtm action because comment is older than 30m
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(
+        pr_123_actions, 1,
+        "Should allow re-posting /lgtm when comment is older than custom history-max-age"
+    );
+}
+
+#[tokio::test]
+async fn test_history_check_custom_max_comments() {
+    // Test: custom --history-max-comments flag should be respected
+    let mut mock_data = create_mock_github_data();
+
+    // Add /lgtm comment from 10 minutes ago
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "/lgtm".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(10),
+    });
+
+    // Add only 2 more comments (not enough to push /lgtm out of last 10, but enough for last 2)
+    for i in 1..=2 {
+        mock_data[0].recent_comments.push(CommentInfo {
+            body: format!("Comment {}", i),
+            created_at: Utc::now() - chrono::Duration::minutes(5),
+        });
+    }
+
+    // Remove the lgtm label
+    mock_data[0].labels.retain(|l| l != "lgtm");
+
+    let provider = MockHub::new(mock_data);
+
+    // With custom --history-max-comments 2, /lgtm should be outside the window
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--lgtm",
+            "--history-max-comments",
+            "2",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 SHOULD have an lgtm action because comment is outside last 2 comments
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(
+        pr_123_actions, 1,
+        "Should allow re-posting /lgtm when comment is outside custom history-max-comments window"
+    );
+}
+
+#[tokio::test]
 async fn test_cli_validation_invalid_pr_url_format() {
     // Test: malformed PR URLs should fail gracefully
     let provider = MockHub::new(vec![]);

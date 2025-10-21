@@ -344,6 +344,14 @@ struct CliArgs {
     #[arg(long, value_name = "DURATION")]
     pub throttle: Option<String>,
 
+    /// Maximum age for history check (e.g. 30m, 1h, 2h; default: 1h)
+    #[arg(long, value_name = "DURATION", hide = true)]
+    pub history_max_age: Option<String>,
+
+    /// Maximum number of recent comments to check in history (default: 10)
+    #[arg(long, value_name = "NUM", hide = true)]
+    pub history_max_comments: Option<usize>,
+
     /// Show detailed PR information
     #[arg(short = 'd', long)]
     pub detailed: bool,
@@ -616,6 +624,16 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
         .map(|t| parse_throttle_duration(t))
         .transpose()?;
 
+    let history_max_age = cli
+        .history_max_age
+        .as_ref()
+        .filter(|t| !t.trim().is_empty())
+        .map(|t| parse_throttle_duration(t))
+        .transpose()?
+        .unwrap_or(Duration::from_secs(60 * 60)); // Default: 1 hour
+
+    let history_max_comments = cli.history_max_comments.unwrap_or(10); // Default: 10
+
     Ok(QuerySpec {
         repos,
         prs: pr_identifiers,
@@ -627,6 +645,8 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
         actions: cli_to_actions(&cli.actions),
         custom_comments: cli.comment,
         throttle,
+        history_max_age,
+        history_max_comments,
         truncate_titles: cli.no_wrap,
     })
 }
