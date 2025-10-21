@@ -2175,7 +2175,8 @@ fn test_parse_args_and_create_request_from() {
     assert!(result.is_ok());
 
     let (request, display_mode) = result.unwrap();
-    assert_eq!(request.repo.as_ref().unwrap().to_string(), "owner/repo");
+    assert_eq!(request.repos.len(), 1);
+    assert_eq!(request.repos[0].to_string(), "owner/repo");
     assert_eq!(request.actions.len(), 1);
     assert_eq!(request.custom_comments.len(), 1);
     assert_eq!(request.custom_comments[0], "Test comment");

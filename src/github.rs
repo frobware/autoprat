@@ -817,7 +817,7 @@ async fn fetch_prs_with_pagination(
 #[instrument(skip(spec), fields(
     has_specific_prs = !spec.prs.is_empty(),
     pr_count = spec.prs.len(),
-    has_repo = spec.repo.is_some(),
+    repo_count = spec.repos.len(),
     has_custom_query = spec.query.is_some(),
     limit = spec.limit
 ))]
@@ -834,23 +834,24 @@ async fn fetch_github_data(spec: &crate::types::QuerySpec) -> Result<Vec<PullReq
     let result = if !spec.prs.is_empty() {
         debug!("Fetching specific PRs");
         collect_specific_prs(&octocrab, &spec.prs).await
+    } else if spec.query.is_some() {
+        debug!("Using custom query");
+        let search_query = spec.query.as_ref().unwrap();
+        fetch_prs_with_pagination(&octocrab, search_query, spec.limit, None).await
+    } else if !spec.repos.is_empty() {
+        debug!("Fetching PRs from {} repo(s)", spec.repos.len());
+        let mut all_prs = Vec::new();
+        for repo in &spec.repos {
+            let search_query = repo.build_search_query(&spec.search_filters);
+            let prs =
+                fetch_prs_with_pagination(&octocrab, &search_query, spec.limit, Some(repo.clone()))
+                    .await?;
+            all_prs.extend(prs);
+        }
+        Ok(all_prs)
     } else {
-        let query = if spec.query.is_some() {
-            debug!("Using custom query");
-            spec.query.clone()
-        } else {
-            debug!("Building search query from repo filters");
-            spec.repo
-                .as_ref()
-                .map(|repo| repo.build_search_query(&spec.search_filters))
-        };
-
-        let Some(search_query) = query else {
-            error!("No query available for search");
-            anyhow::bail!("Query is required when not fetching specific PRs");
-        };
-
-        fetch_prs_with_pagination(&octocrab, &search_query, spec.limit, spec.repo.clone()).await
+        error!("No query available for search");
+        anyhow::bail!("Query is required when not fetching specific PRs")
     };
 
     // Check rate limit after operations complete.

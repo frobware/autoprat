@@ -526,7 +526,7 @@ pub trait Forge {
 /// broad searches.
 #[derive(Debug)]
 pub struct QuerySpec {
-    pub repo: Option<Repo>,
+    pub repos: Vec<Repo>,
     pub prs: Vec<(Repo, u64)>,
     pub exclude: Vec<(Repo, u64)>,
     pub query: Option<String>,

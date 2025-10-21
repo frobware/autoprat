@@ -310,9 +310,9 @@ struct FilterArgs {
 )]
 #[command(long_version = BUILD_INFO_HUMAN)]
 struct CliArgs {
-    /// GitHub repository in format 'owner/repo' (required when using numeric PR arguments or no PR arguments)
+    /// GitHub repository in format 'owner/repo' (can specify multiple)
     #[arg(short = 'r', long = "repo", value_name = "OWNER/REPO")]
-    pub repo: Option<String>,
+    pub repo: Vec<String>,
 
     /// PR-NUMBER|PR-URL ...
     pub prs: Vec<String>,
@@ -367,12 +367,12 @@ struct CliArgs {
 
 impl CliArgs {
     pub fn validate(&self) -> Result<()> {
-        if self.repo.is_none() && self.query.is_none() && self.prs.is_empty() {
+        if self.repo.is_empty() && self.query.is_none() && self.prs.is_empty() {
             anyhow::bail!("Must specify one of: --repo, --query, or --prs");
         }
 
         if self.query.is_some() {
-            if self.repo.is_some() {
+            if !self.repo.is_empty() {
                 anyhow::bail!("Cannot use --repo with --query (specify repo in query instead)");
             }
             if !self.prs.is_empty() {
@@ -380,17 +380,29 @@ impl CliArgs {
             }
         }
 
-        if !self.prs.is_empty() && self.repo.is_none() {
-            let has_pr_numbers = self.prs.iter().any(|pr| !pr.starts_with("https://"));
-            if has_pr_numbers {
-                anyhow::bail!("--repo is required when using PR numbers (not URLs)");
+        if !self.prs.is_empty() {
+            if self.repo.is_empty() {
+                let has_pr_numbers = self.prs.iter().any(|pr| !pr.starts_with("https://"));
+                if has_pr_numbers {
+                    anyhow::bail!("--repo is required when using PR numbers (not URLs)");
+                }
+            } else if self.repo.len() > 1 {
+                anyhow::bail!(
+                    "Cannot specify multiple --repo flags when using PR numbers (use PR URLs instead or specify a single repo)"
+                );
             }
         }
 
-        if !self.exclude.is_empty() && self.repo.is_none() {
-            let has_pr_numbers = self.exclude.iter().any(|pr| !pr.starts_with("https://"));
-            if has_pr_numbers {
-                anyhow::bail!("--repo is required when using exclude PR numbers (not URLs)");
+        if !self.exclude.is_empty() {
+            if self.repo.is_empty() {
+                let has_pr_numbers = self.exclude.iter().any(|pr| !pr.starts_with("https://"));
+                if has_pr_numbers {
+                    anyhow::bail!("--repo is required when using exclude PR numbers (not URLs)");
+                }
+            } else if self.repo.len() > 1 {
+                anyhow::bail!(
+                    "Cannot specify multiple --repo flags when using exclude PR numbers (use PR URLs instead or specify a single repo)"
+                );
             }
         }
 
@@ -507,13 +519,14 @@ fn parse_throttle_duration(throttle_str: &str) -> Result<Duration> {
     )
 }
 
-fn validate_pr_urls_against_repo(repo: Option<&str>, prs: &[String]) -> Result<()> {
-    let Some(repo) = repo else {
+fn validate_pr_urls_against_repo(repos: &[String], prs: &[String]) -> Result<()> {
+    // Only validate if there's exactly one repo specified
+    if repos.len() != 1 {
         return Ok(());
-    };
+    }
 
-    let expected_repo = Repo::parse(repo)
-        .map_err(|e| anyhow::anyhow!("Invalid repository format '{}': {}", repo, e))?;
+    let expected_repo = Repo::parse(&repos[0])
+        .map_err(|e| anyhow::anyhow!("Invalid repository format '{}': {}", repos[0], e))?;
 
     for pr in prs {
         if pr.starts_with("https://") {
@@ -532,7 +545,7 @@ fn validate_pr_urls_against_repo(repo: Option<&str>, prs: &[String]) -> Result<(
     Ok(())
 }
 
-fn parse_pr_args_to_identifiers(repo: &Option<String>, prs: &[String]) -> Result<Vec<(Repo, u64)>> {
+fn parse_pr_args_to_identifiers(repos: &[String], prs: &[String]) -> Result<Vec<(Repo, u64)>> {
     let mut identifiers = Vec::new();
 
     for pr in prs {
@@ -546,11 +559,12 @@ fn parse_pr_args_to_identifiers(repo: &Option<String>, prs: &[String]) -> Result
                 .ok_or_else(|| anyhow::anyhow!("URL must contain '/pull/' in the path"))?;
             identifiers.push((repo, pr_number));
         } else {
-            let Some(repo) = repo else {
+            if repos.is_empty() {
                 anyhow::bail!("PR numbers require --repo to be specified");
-            };
-            let repo_id = Repo::parse(repo)
-                .map_err(|e| anyhow::anyhow!("Invalid repository format '{}': {}", repo, e))?;
+            }
+            // Should only be one repo if we got here (validated earlier)
+            let repo_id = Repo::parse(&repos[0])
+                .map_err(|e| anyhow::anyhow!("Invalid repository format '{}': {}", repos[0], e))?;
 
             let pr_number: u64 = pr
                 .parse()
@@ -575,16 +589,17 @@ fn determine_display_mode(cli: &CliArgs) -> DisplayMode {
 fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
     cli.validate()?;
 
-    let repo = cli
+    let repos: Result<Vec<Repo>> = cli
         .repo
-        .as_ref()
+        .iter()
         .map(|r| {
             Repo::parse(r).map_err(|e| anyhow::anyhow!("Invalid repository format '{}': {}", r, e))
         })
-        .transpose()?;
+        .collect();
+    let repos = repos?;
 
-    validate_pr_urls_against_repo(cli.repo.as_deref(), &cli.prs)?;
-    validate_pr_urls_against_repo(cli.repo.as_deref(), &cli.exclude)?;
+    validate_pr_urls_against_repo(&cli.repo, &cli.prs)?;
+    validate_pr_urls_against_repo(&cli.repo, &cli.exclude)?;
     let pr_identifiers = parse_pr_args_to_identifiers(&cli.repo, &cli.prs)?;
     let exclude_identifiers = parse_pr_args_to_identifiers(&cli.repo, &cli.exclude)?;
 
@@ -602,7 +617,7 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
         .transpose()?;
 
     Ok(QuerySpec {
-        repo,
+        repos,
         prs: pr_identifiers,
         exclude: exclude_identifiers,
         query,

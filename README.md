@@ -48,7 +48,10 @@ autoprat --detailed https://github.com/your-org/your-repo/pull/123
 autoprat -r your-org/your-repo --needs-approve --exclude 123,456 --approve
 autoprat -r your-org/your-repo --exclude https://github.com/your-org/your-repo/pull/789 --lgtm
 
-# Monitor PRs across multiple repositories.
+# Query multiple repositories with the same filters.
+autoprat -r your-org/repo1 -r your-org/repo2 --failing-ci
+
+# Monitor specific PRs across multiple repositories.
 autoprat --detailed https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456
 
 # Approve trusted bot PRs.
@@ -115,21 +118,26 @@ autoprat --query "repo:myorg/myrepo label:bug -label:wontfix updated:>2024-01-01
 
 ### Multi-Repository Workflows
 ```bash
-# Monitor related PRs across multiple repositories.
+# Query multiple repositories with the same filters.
+autoprat -r myorg/backend -r myorg/frontend --failing-ci
+
+# Bulk approve Dependabot PRs across multiple repositories.
+autoprat -r myorg/repo1 -r myorg/repo2 -r myorg/repo3 \
+  --author dependabot --approve | sh
+
+# Monitor PRs needing approval across related repositories.
+autoprat -r myorg/backend -r myorg/frontend -r myorg/docs \
+  --needs-approve --needs-lgtm
+
+# Monitor related PRs across multiple repositories using URLs.
 autoprat --detailed \
   https://github.com/myorg/backend/pull/123 \
   https://github.com/myorg/frontend/pull/456
 
-# Apply filters across multiple repositories.
+# Apply filters across multiple repositories using URLs.
 autoprat --author dependabot --approve \
   https://github.com/myorg/repo1/pull/123 \
   https://github.com/myorg/repo2/pull/456
-
-# Bulk approve Dependabot PRs across an organization.
-autoprat --author "dependabot" --approve \
-  https://github.com/myorg/backend/pull/789 \
-  https://github.com/myorg/frontend/pull/101 \
-  https://github.com/myorg/docs/pull/202
 ```
 
 ## How It Works
@@ -225,7 +233,7 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 ## All Options
 
 ### Repository
-- `-r, --repo <REPO>` - GitHub repository in format 'owner/repo' (required when using numeric PR arguments or no PR arguments)
+- `-r, --repo <REPO>` - GitHub repository in format 'owner/repo' (can specify multiple to query across repositories)
 
 ### Positional Arguments
 - `[PRS]...` - Focus on specific PRs by number or URL (can specify multiple)
@@ -326,7 +334,7 @@ cp target/release/autoprat ~/.local/bin/autoprat
 6. **Combine filters** - Multiple filters use AND logic for precise targeting
 7. **Exact check names** - Use `--failing-check` with exact CI check names for safety
 8. **Script the common cases** - Save frequent filter combinations as shell aliases
-9. **Use with watch** - Monitor PRs continuously: `watch -n 180 "autoprat -r org/repo --no-wrap"` (180s - be wary of rate limiting)
+9. **Use with watch** - Monitor PRs continuously: `watch -n 180 "autoprat -r org/repo --no-wrap"` or across multiple repos: `watch -n 180 "autoprat -r org/repo1 -r org/repo2 --failing-ci --no-wrap"` (180s interval recommended to avoid rate limiting)
 
 ## License
 
