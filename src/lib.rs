@@ -14,7 +14,7 @@ pub use cli::parse_args;
 pub use github::GitHub;
 pub use query::fetch_pull_requests;
 pub use types::{
-    Action, CheckConclusion, CheckInfo, CheckName, CheckNameError, CheckState, CheckUrl,
-    CommentInfo, DisplayMode, Forge, LogUrl, LogUrlError, PostFilter, PullRequest, QueryResult,
-    QuerySpec, Repo, RepoError, SearchFilter, Task,
+    Action, CheckConclusion, CheckInfo, CheckName, CheckNameError, CheckRunStatus, CheckState,
+    CheckUrl, CommentInfo, DisplayMode, Forge, LogUrl, LogUrlError, PostFilter, PullRequest,
+    QueryResult, QuerySpec, Repo, RepoError, SearchFilter, Task,
 };

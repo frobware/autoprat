@@ -324,14 +324,26 @@ pub enum CheckState {
     Error,
 }
 
+/// Status of a GitHub Check Run (before it completes).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CheckRunStatus {
+    Queued,
+    InProgress,
+    Completed,
+    Waiting,
+    Requested,
+    Pending,
+}
+
 /// Information about a CI check or status.
 ///
-/// Represents either a GitHub Check Run (with conclusion) or a
+/// Represents either a GitHub Check Run (with conclusion and run_status) or a
 /// Status Context (with state). May include a URL to detailed logs.
 #[derive(Debug, Clone)]
 pub struct CheckInfo {
     pub name: CheckName,
     pub conclusion: Option<CheckConclusion>,
+    pub run_status: Option<CheckRunStatus>,
     pub status_state: Option<CheckState>,
     pub url: Option<CheckUrl>,
 }

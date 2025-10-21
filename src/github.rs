@@ -12,7 +12,8 @@ use tracing::{debug, error, info, instrument, warn};
 use url::Url;
 
 use crate::types::{
-    CheckConclusion, CheckInfo, CheckName, CheckState, CheckUrl, CommentInfo, PullRequest, Repo,
+    CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, CheckUrl, CommentInfo,
+    PullRequest, Repo,
 };
 
 #[derive(Debug, Deserialize)]
@@ -238,6 +239,17 @@ fn convert_status_state(state: StatusState) -> CheckState {
     }
 }
 
+fn convert_check_run_status(status: GraphQLCheckRunStatus) -> CheckRunStatus {
+    match status {
+        GraphQLCheckRunStatus::Queued => CheckRunStatus::Queued,
+        GraphQLCheckRunStatus::InProgress => CheckRunStatus::InProgress,
+        GraphQLCheckRunStatus::Completed => CheckRunStatus::Completed,
+        GraphQLCheckRunStatus::Waiting => CheckRunStatus::Waiting,
+        GraphQLCheckRunStatus::Requested => CheckRunStatus::Requested,
+        GraphQLCheckRunStatus::Pending => CheckRunStatus::Pending,
+    }
+}
+
 /// Custom deserialiser for GraphQL conclusion values.
 ///
 /// Converts uppercase GraphQL enum values (e.g., "SUCCESS") to
@@ -314,11 +326,49 @@ impl ActorType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum GraphQLCheckRunStatus {
+    Queued,
+    InProgress,
+    Completed,
+    Waiting,
+    Requested,
+    Pending,
+}
+
+fn deserialize_graphql_check_run_status<'de, D>(
+    deserializer: D,
+) -> Result<Option<GraphQLCheckRunStatus>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let status: Option<String> = Option::deserialize(deserializer)?;
+    let result = status
+        .map(|s| match s.as_str() {
+            "QUEUED" => Ok(GraphQLCheckRunStatus::Queued),
+            "IN_PROGRESS" => Ok(GraphQLCheckRunStatus::InProgress),
+            "COMPLETED" => Ok(GraphQLCheckRunStatus::Completed),
+            "WAITING" => Ok(GraphQLCheckRunStatus::Waiting),
+            "REQUESTED" => Ok(GraphQLCheckRunStatus::Requested),
+            "PENDING" => Ok(GraphQLCheckRunStatus::Pending),
+            unknown => Err(Error::custom(format!(
+                "Unknown GraphQL check run status value: '{unknown}'"
+            ))),
+        })
+        .transpose()?;
+    Ok(result)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "__typename")]
 enum GraphQLStatusContext {
     CheckRun {
         name: Option<String>,
+        #[serde(deserialize_with = "deserialize_graphql_check_run_status", default)]
+        status: Option<GraphQLCheckRunStatus>,
         #[serde(deserialize_with = "deserialize_graphql_conclusion", default)]
         conclusion: Option<Conclusion>,
         #[serde(rename = "detailsUrl")]
@@ -494,12 +544,14 @@ fn convert_graphql_status_context(context: GraphQLStatusContext) -> CheckInfo {
     match context {
         GraphQLStatusContext::CheckRun {
             name,
+            status,
             conclusion,
             details_url,
         } => CheckInfo {
             name: CheckName::new(name.unwrap_or_else(|| "Unknown Check".to_string()))
                 .unwrap_or_else(|_| CheckName::new("Unknown").unwrap()),
             conclusion: conclusion.map(convert_conclusion),
+            run_status: status.map(convert_check_run_status),
             status_state: None,
             url: details_url.and_then(|url| CheckUrl::new(&url).ok()),
         },
@@ -511,6 +563,7 @@ fn convert_graphql_status_context(context: GraphQLStatusContext) -> CheckInfo {
             name: CheckName::new(context.unwrap_or_else(|| "Unknown Status".to_string()))
                 .unwrap_or_else(|_| CheckName::new("Unknown").unwrap()),
             conclusion: None,
+            run_status: None,
             status_state: state.map(convert_status_state),
             url: target_url.and_then(|url| CheckUrl::new(&url).ok()),
         },
@@ -913,6 +966,7 @@ mod tests {
                     nodes: vec![
                         GraphQLStatusContext::CheckRun {
                             name: Some("test-check".to_string()),
+                            status: Some(GraphQLCheckRunStatus::Completed),
                             conclusion: Some(Conclusion::Success),
                             details_url: Some("https://example.com/check/1".to_string()),
                         },
@@ -1038,6 +1092,7 @@ mod tests {
                 nodes: vec![
                     GraphQLStatusContext::CheckRun {
                         name: None, // Missing name.
+                        status: Some(GraphQLCheckRunStatus::Completed),
                         conclusion: Some(Conclusion::Success),
                         details_url: Some("https://example.com/check/1".to_string()),
                     },
@@ -1068,6 +1123,7 @@ mod tests {
             contexts: GraphQLStatusContextConnection {
                 nodes: vec![GraphQLStatusContext::CheckRun {
                     name: Some("test-check".to_string()),
+                    status: Some(GraphQLCheckRunStatus::Completed),
                     conclusion: Some(Conclusion::Success),
                     details_url: Some("not-a-valid-url".to_string()),
                 }],

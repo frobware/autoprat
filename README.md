@@ -143,6 +143,29 @@ autoprat --author "dependabot" --approve \
 
 autoprat never executes commands itself - it only generates `gh pr comment` commands for you to review and run.
 
+## Understanding the Output
+
+### CI Status Column
+The CI column shows the current state of CI checks:
+
+**When checks are running:**
+- Shows detailed breakdown: `S:4 F:0 C:1 X:1 Q:2 (5/8)`
+  - `S:4` - 4 checks succeeded
+  - `F:0` - 0 checks failed
+  - `C:1` - 1 check cancelled
+  - `X:1` - 1 check in progress
+  - `Q:2` - 2 checks queued
+  - `P:0` - 0 checks pending (other pending states)
+  - `(5/8)` - 5 completed out of 8 total
+
+**When all checks complete:**
+- `Success` - All checks passed
+- `F:1 C:1` - 1 failed, 1 cancelled
+- `F:2 C:1 (3/5)` - 2 failed, 1 cancelled out of 5 total (with some successes)
+- `Failed: 2/5` - Some checks failed (no cancellations)
+
+**Note:** Merge prerequisite checks (like Prow's tide) are not counted as "pending" - look at the label columns (LGTM, APP) to understand merge blockers.
+
 ## Smart Features
 
 ### Idempotent Actions

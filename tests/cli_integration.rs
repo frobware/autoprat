@@ -72,6 +72,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
+                run_status: None,
                 status_state: None,
                 url: Some(CheckUrl::new("https://github.com/checks/1").unwrap()),
             }],
@@ -92,12 +93,14 @@ fn create_mock_github_data() -> Vec<PullRequest> {
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
                     conclusion: Some(CheckConclusion::Success),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/2").unwrap()),
                 },
                 CheckInfo {
                     name: CheckName::new("ci/test").unwrap(),
                     conclusion: Some(CheckConclusion::Success),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/3").unwrap()),
                 },
@@ -119,12 +122,14 @@ fn create_mock_github_data() -> Vec<PullRequest> {
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
                     conclusion: Some(CheckConclusion::Failure),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/4").unwrap()),
                 },
                 CheckInfo {
                     name: CheckName::new("ci/test").unwrap(),
                     conclusion: Some(CheckConclusion::Failure),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/5").unwrap()),
                 },
@@ -145,6 +150,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/lint").unwrap(),
                 conclusion: Some(CheckConclusion::Failure),
+                run_status: None,
                 status_state: None,
                 url: Some(CheckUrl::new("https://github.com/checks/6").unwrap()),
             }],
@@ -165,18 +171,21 @@ fn create_mock_github_data() -> Vec<PullRequest> {
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
                     conclusion: Some(CheckConclusion::Success),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/7").unwrap()),
                 },
                 CheckInfo {
                     name: CheckName::new("ci/test").unwrap(),
                     conclusion: Some(CheckConclusion::Failure),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/8").unwrap()),
                 },
                 CheckInfo {
                     name: CheckName::new("ci/lint").unwrap(),
                     conclusion: Some(CheckConclusion::Success),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/9").unwrap()),
                 },
@@ -197,6 +206,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
+                run_status: None,
                 status_state: None,
                 url: Some(CheckUrl::new("https://github.com/checks/10").unwrap()),
             }],
@@ -221,12 +231,14 @@ fn create_mock_github_data() -> Vec<PullRequest> {
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
                     conclusion: Some(CheckConclusion::Success),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/11").unwrap()),
                 },
                 CheckInfo {
                     name: CheckName::new("ci/test").unwrap(),
                     conclusion: Some(CheckConclusion::Success),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/12").unwrap()),
                 },
@@ -261,6 +273,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
+                run_status: None,
                 status_state: None,
                 url: Some(CheckUrl::new("https://github.com/checks/13").unwrap()),
             }],
@@ -2684,6 +2697,7 @@ async fn test_multi_repository_urls() {
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/unit-tests").unwrap(),
                 conclusion: None,
+                run_status: None,
                 status_state: Some(CheckState::Pending),
                 url: Some(CheckUrl::new("https://github.com/checks/acme-1").unwrap()),
             }],
@@ -2704,12 +2718,14 @@ async fn test_multi_repository_urls() {
                 CheckInfo {
                     name: CheckName::new("ci/integration-tests").unwrap(),
                     conclusion: Some(CheckConclusion::Failure),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/widgets-1").unwrap()),
                 },
                 CheckInfo {
                     name: CheckName::new("ci/lint").unwrap(),
                     conclusion: Some(CheckConclusion::Success),
+                    run_status: None,
                     status_state: None,
                     url: Some(CheckUrl::new("https://github.com/checks/widgets-2").unwrap()),
                 },

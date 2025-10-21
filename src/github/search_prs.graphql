@@ -22,6 +22,7 @@ query($query: String!, $after: String) {
                             __typename
                             ... on CheckRun {
                                 name
+                                status
                                 conclusion
                                 detailsUrl
                             }

@@ -6,7 +6,8 @@ use std::{
 
 use anyhow::Result;
 use autoprat::{
-    Action, CheckConclusion, CheckInfo, CheckName, CheckState, DisplayMode, PullRequest, Task,
+    Action, CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, DisplayMode,
+    PullRequest, Task,
 };
 #[cfg(test)]
 use autoprat::{CheckUrl, Repo};
@@ -18,7 +19,19 @@ const LABEL_OK_TO_TEST: &str = "ok-to-test";
 const LABEL_HOLD: &str = "do-not-merge/hold";
 
 #[derive(Debug, Clone, PartialEq)]
-enum CiStatus {
+struct CiStatus {
+    queued_count: usize,
+    in_progress_count: usize,
+    pending_count: usize,
+    failed_count: usize,
+    cancelled_count: usize,
+    success_count: usize,
+    total_count: usize,
+    status_type: CiStatusType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum CiStatusType {
     Success,
     Failure,
     Pending,
@@ -27,44 +40,157 @@ enum CiStatus {
 
 fn get_ci_status(checks: &[CheckInfo]) -> CiStatus {
     if checks.is_empty() {
-        return CiStatus::Unknown;
+        return CiStatus {
+            queued_count: 0,
+            in_progress_count: 0,
+            pending_count: 0,
+            failed_count: 0,
+            cancelled_count: 0,
+            success_count: 0,
+            total_count: 0,
+            status_type: CiStatusType::Unknown,
+        };
     }
 
-    let mut has_failure = false;
-    let mut has_pending = false;
-    let mut has_success = false;
+    let mut queued_count = 0;
+    let mut in_progress_count = 0;
+    let mut pending_count = 0;
+    let mut failed_count = 0;
+    let mut cancelled_count = 0;
+    let mut success_count = 0;
+    let mut ignored_count = 0; // Track ignored StatusContext PENDING checks
 
     for check in checks {
+        // First check run_status (for CheckRuns)
+        if let Some(run_status) = &check.run_status {
+            match run_status {
+                CheckRunStatus::Queued | CheckRunStatus::Waiting | CheckRunStatus::Requested => {
+                    queued_count += 1;
+                    continue;
+                }
+                CheckRunStatus::InProgress | CheckRunStatus::Pending => {
+                    in_progress_count += 1;
+                    continue;
+                }
+                CheckRunStatus::Completed => {
+                    // Fall through to check conclusion
+                }
+            }
+        }
+
+        // Check conclusion/state for completed checks
         match (&check.conclusion, &check.status_state) {
-            (
-                Some(
-                    CheckConclusion::Failure
-                    | CheckConclusion::Cancelled
-                    | CheckConclusion::TimedOut,
-                ),
-                _,
-            )
+            (Some(CheckConclusion::Cancelled), _) => {
+                cancelled_count += 1;
+            }
+            (Some(CheckConclusion::Failure | CheckConclusion::TimedOut), _)
             | (_, Some(CheckState::Failure | CheckState::Error)) => {
-                has_failure = true;
+                failed_count += 1;
             }
             (Some(CheckConclusion::Success), _) | (_, Some(CheckState::Success)) => {
-                has_success = true;
+                success_count += 1;
             }
-            (None, Some(CheckState::Pending)) | (Some(CheckConclusion::ActionRequired), _) => {
-                has_pending = true;
+            // StatusContext with PENDING state (like tide merge bot) - don't count as actively pending
+            (None, Some(CheckState::Pending)) => {
+                // Ignore - these are typically merge prerequisites, not active CI checks
+                ignored_count += 1;
             }
-            _ => {}
+            (Some(CheckConclusion::ActionRequired), _) => {
+                pending_count += 1;
+            }
+            _ => {
+                // Uncategorized check - treat as pending only if it has no run_status
+                // (if it had run_status, it would have been handled above)
+                if check.run_status.is_none() {
+                    pending_count += 1;
+                }
+            }
         }
     }
 
-    if has_failure {
-        CiStatus::Failure
-    } else if has_pending {
-        CiStatus::Pending
-    } else if has_success {
-        CiStatus::Success
+    // Total count excludes ignored StatusContext PENDING checks
+    let total_count = checks.len() - ignored_count;
+
+    let total_pending = queued_count + in_progress_count + pending_count;
+    let status_type = if total_pending > 0 {
+        CiStatusType::Pending
+    } else if failed_count > 0 || cancelled_count > 0 {
+        CiStatusType::Failure
+    } else if success_count > 0 {
+        CiStatusType::Success
     } else {
-        CiStatus::Unknown
+        CiStatusType::Unknown
+    };
+
+    CiStatus {
+        queued_count,
+        in_progress_count,
+        pending_count,
+        failed_count,
+        cancelled_count,
+        success_count,
+        total_count,
+        status_type,
+    }
+}
+
+fn format_ci_status(status: &CiStatus) -> String {
+    if status.total_count == 0 {
+        return "Unknown".to_string();
+    }
+
+    let total_pending = status.queued_count + status.in_progress_count + status.pending_count;
+
+    // If there are any pending/in-progress/queued checks, show detailed breakdown
+    if total_pending > 0 {
+        let completed = status.success_count + status.failed_count + status.cancelled_count;
+        let mut parts = vec![
+            format!("S:{}", status.success_count),
+            format!("F:{}", status.failed_count),
+        ];
+
+        if status.cancelled_count > 0 {
+            parts.push(format!("C:{}", status.cancelled_count));
+        }
+        if status.in_progress_count > 0 {
+            parts.push(format!("X:{}", status.in_progress_count));
+        }
+        if status.queued_count > 0 {
+            parts.push(format!("Q:{}", status.queued_count));
+        }
+        if status.pending_count > 0 {
+            parts.push(format!("P:{}", status.pending_count));
+        }
+
+        return format!("{} ({}/{})", parts.join(" "), completed, status.total_count);
+    }
+
+    // All checks complete - show definitive status
+    match status.status_type {
+        CiStatusType::Failure => {
+            let total_bad = status.failed_count + status.cancelled_count;
+            if total_bad == status.total_count {
+                // All checks failed/cancelled
+                if status.cancelled_count > 0 {
+                    format!("F:{} C:{}", status.failed_count, status.cancelled_count)
+                } else {
+                    format!("Failed ({})", status.failed_count)
+                }
+            } else {
+                // Some checks failed/cancelled
+                if status.cancelled_count > 0 {
+                    format!(
+                        "F:{} C:{} ({}/{})",
+                        status.failed_count, status.cancelled_count, total_bad, status.total_count
+                    )
+                } else {
+                    format!("Failed: {}/{}", status.failed_count, status.total_count)
+                }
+            }
+        }
+        CiStatusType::Success => "Success".to_string(),
+        CiStatusType::Unknown => "Unknown".to_string(),
+        CiStatusType::Pending => unreachable!("Pending status with no pending checks"),
     }
 }
 
@@ -154,12 +280,7 @@ fn get_terminal_width(width_override: Option<usize>) -> usize {
 
 fn pr_to_table_row(pr: &PullRequest) -> Vec<String> {
     let ci_status = get_ci_status(&pr.checks);
-    let ci_str = match ci_status {
-        CiStatus::Success => "Success",
-        CiStatus::Failure => "Failing",
-        CiStatus::Pending => "Pending",
-        CiStatus::Unknown => "Unknown",
-    };
+    let ci_str = format_ci_status(&ci_status);
 
     let approved = if pr.has_label(LABEL_APPROVED) {
         "✓"
@@ -403,11 +524,11 @@ impl<'a> PrDetailFormatter<'a> {
         writeln!(
             writer,
             "│ ├─CI: {}",
-            match ci_status {
-                CiStatus::Success => "Success",
-                CiStatus::Failure => "Failing",
-                CiStatus::Pending => "Pending",
-                CiStatus::Unknown => "Unknown",
+            match ci_status.status_type {
+                CiStatusType::Success => "Success",
+                CiStatusType::Failure => "Failing",
+                CiStatusType::Pending => "Pending",
+                CiStatusType::Unknown => "Unknown",
             }
         )?;
 
@@ -711,12 +832,14 @@ mod tests {
                 CheckInfo {
                     name: CheckName::new("unit-tests").unwrap(),
                     conclusion: Some(CheckConclusion::Success),
+                    run_status: Some(CheckRunStatus::Completed),
                     status_state: None,
                     url: CheckUrl::new("https://github.com/checks/1").ok(),
                 },
                 CheckInfo {
                     name: CheckName::new("integration-tests").unwrap(),
                     conclusion: Some(CheckConclusion::Failure),
+                    run_status: Some(CheckRunStatus::Completed),
                     status_state: None,
                     url: CheckUrl::new("https://github.com/checks/2").ok(),
                 },
