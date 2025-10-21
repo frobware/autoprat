@@ -266,6 +266,9 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `-D, --detailed-with-logs` - Show detailed PR information with error logs from failing checks
 - `-q, --quiet` - Print PR numbers only
 - `-L, --limit <LIMIT>` - Limit the number of PRs to process [default: 30]
+- `--no-wrap` - Enable title truncation when output is redirected (for use with `watch`, pagers, or pipes)
+
+**When to use `--no-wrap`:** By default, autoprat detects terminal width only when stdout is a TTY. When using tools like `watch` or piping output, stdout is redirected and autoprat cannot detect the terminal width, causing long titles to wrap. The `--no-wrap` flag forces width detection by querying `/dev/tty` directly (the controlling terminal), ensuring titles are properly truncated even when output is redirected.
 
 ### Debugging
 Use the `RUST_LOG` environment variable for granular tracing:
@@ -323,6 +326,7 @@ cp target/release/autoprat ~/.local/bin/autoprat
 6. **Combine filters** - Multiple filters use AND logic for precise targeting
 7. **Exact check names** - Use `--failing-check` with exact CI check names for safety
 8. **Script the common cases** - Save frequent filter combinations as shell aliases
+9. **Use with watch** - Monitor PRs continuously: `watch -n 180 "autoprat -r org/repo --no-wrap"` (180s - be wary of rate limiting)
 
 ## License
 

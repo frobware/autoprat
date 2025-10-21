@@ -50,7 +50,13 @@ async fn main() -> anyhow::Result<()> {
     if request.has_actions() {
         output_shell_commands(&result.executable_actions, &mut stdout)?;
     } else {
-        display_pr_table(&result.filtered_prs, &display_mode, &mut stdout).await?;
+        display_pr_table(
+            &result.filtered_prs,
+            &display_mode,
+            request.truncate_titles,
+            &mut stdout,
+        )
+        .await?;
     }
 
     Ok(())

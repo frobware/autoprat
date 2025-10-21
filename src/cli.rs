@@ -359,6 +359,10 @@ struct CliArgs {
     /// Limit the number of PRs to process
     #[arg(short = 'L', long, default_value = "30", value_name = "NUM")]
     pub limit: usize,
+
+    /// Force title truncation even when not a TTY (useful with watch command)
+    #[arg(long)]
+    pub no_wrap: bool,
 }
 
 impl CliArgs {
@@ -608,6 +612,7 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
         actions: cli_to_actions(&cli.actions),
         custom_comments: cli.comment,
         throttle,
+        truncate_titles: cli.no_wrap,
     })
 }
 

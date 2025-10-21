@@ -229,13 +229,14 @@ fn display_prs_by_mode<W: Write>(
     prs: &[PullRequest],
     mode: &DisplayMode,
     error_logs: Option<&HashMap<u64, HashMap<CheckName, Vec<String>>>>,
+    truncate_titles: bool,
     writer: &mut W,
 ) -> Result<()> {
     match mode {
         DisplayMode::Quiet => display_prs_quiet(prs, writer),
         DisplayMode::Detailed => display_prs_verbose(prs, false, error_logs, writer),
         DisplayMode::DetailedWithLogs => display_prs_verbose(prs, true, error_logs, writer),
-        DisplayMode::Normal => display_prs_table(prs, writer),
+        DisplayMode::Normal => display_prs_table_mode(prs, truncate_titles, writer),
     }
 }
 
@@ -246,8 +247,12 @@ fn display_prs_quiet<W: Write>(prs: &[PullRequest], writer: &mut W) -> Result<()
     Ok(())
 }
 
-fn display_prs_table<W: Write>(prs: &[PullRequest], writer: &mut W) -> Result<()> {
-    display_prs_table_with_width(prs, writer, None)
+fn display_prs_table_mode<W: Write>(
+    prs: &[PullRequest],
+    truncate_titles: bool,
+    writer: &mut W,
+) -> Result<()> {
+    display_prs_table_with_width(prs, writer, None, truncate_titles)
 }
 
 const TABLE_HEADERS: &[&str] = &[
@@ -266,12 +271,44 @@ const COLUMN_SEPARATOR: &str = "  ";
 const TITLE_TRUNCATION_SUFFIX: &str = "...";
 const MIN_TITLE_WIDTH_FOR_TRUNCATION: usize = 3;
 
-fn get_terminal_width(width_override: Option<usize>) -> usize {
+/// Query terminal width from /dev/tty using ioctl.
+/// This works even when stdout is redirected (e.g., in watch or pager).
+#[cfg(unix)]
+fn query_tty_width() -> Option<usize> {
+    use std::{fs::File, os::unix::io::AsRawFd};
+
+    if let Ok(tty) = File::open("/dev/tty") {
+        unsafe {
+            let mut winsize: libc::winsize = std::mem::zeroed();
+            if libc::ioctl(tty.as_raw_fd(), libc::TIOCGWINSZ, &mut winsize) == 0
+                && winsize.ws_col > 0
+            {
+                return Some(winsize.ws_col as usize);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(unix))]
+fn query_tty_width() -> Option<usize> {
+    None
+}
+
+fn get_terminal_width(width_override: Option<usize>, force_truncate: bool) -> usize {
     if let Some(width) = width_override {
         width
     } else if io::stdout().is_terminal() {
         terminal_size::terminal_size()
             .map(|(w, _)| w.0 as usize)
+            .unwrap_or(usize::MAX)
+    } else if force_truncate {
+        // When not a TTY but --no-wrap is set, try multiple methods:
+        // 1. Query /dev/tty directly (works even when stdout is redirected like in watch)
+        // 2. Check COLUMNS env var (set by watch/shell)
+        // 3. Final fallback to MAX (no truncation) if we truly can't detect width
+        query_tty_width()
+            .or_else(|| std::env::var("COLUMNS").ok().and_then(|c| c.parse().ok()))
             .unwrap_or(usize::MAX)
     } else {
         usize::MAX
@@ -413,8 +450,9 @@ fn display_prs_table_with_width<W: Write>(
     prs: &[PullRequest],
     writer: &mut W,
     width_override: Option<usize>,
+    force_truncate: bool,
 ) -> Result<()> {
-    let terminal_width = get_terminal_width(width_override);
+    let terminal_width = get_terminal_width(width_override, force_truncate);
     let mut rows = prs_to_table_rows(prs);
     let mut widths = calculate_column_widths(TABLE_HEADERS, &rows);
 
@@ -764,6 +802,7 @@ pub fn output_shell_commands<W: Write>(actions: &[Task], writer: &mut W) -> Resu
 pub async fn display_pr_table<W: Write + Send>(
     prs: &[PullRequest],
     mode: &DisplayMode,
+    truncate_titles: bool,
     writer: &mut W,
 ) -> Result<()> {
     use crate::log_fetcher::LogFetcher;
@@ -802,7 +841,7 @@ pub async fn display_pr_table<W: Write + Send>(
         None
     };
 
-    display_prs_by_mode(prs, mode, error_logs.as_ref(), writer)
+    display_prs_by_mode(prs, mode, error_logs.as_ref(), truncate_titles, writer)
 }
 
 #[cfg(test)]
@@ -863,7 +902,9 @@ mod tests {
         let mode = create_display_mode(true, false, false);
         let mut output = Vec::new();
 
-        display_pr_table(&prs, &mode, &mut output).await.unwrap();
+        display_pr_table(&prs, &mode, false, &mut output)
+            .await
+            .unwrap();
 
         let result = String::from_utf8(output).unwrap();
         assert_eq!(result, "101\n");
@@ -875,7 +916,7 @@ mod tests {
         let mut output = Vec::new();
 
         // Use a large fixed width in tests to prevent truncation and make tests deterministic.
-        display_prs_table_with_width(&prs, &mut output, Some(usize::MAX)).unwrap();
+        display_prs_table_with_width(&prs, &mut output, Some(usize::MAX), false).unwrap();
 
         let result = String::from_utf8(output).unwrap();
 
@@ -904,7 +945,9 @@ mod tests {
         let mode = create_display_mode(false, true, false);
         let mut output = Vec::new();
 
-        display_pr_table(&prs, &mode, &mut output).await.unwrap();
+        display_pr_table(&prs, &mode, false, &mut output)
+            .await
+            .unwrap();
 
         let result = String::from_utf8(output).unwrap();
 
@@ -933,7 +976,9 @@ mod tests {
         let mode = create_display_mode(false, false, true);
         let mut output = Vec::new();
 
-        display_pr_table(&prs, &mode, &mut output).await.unwrap();
+        display_pr_table(&prs, &mode, false, &mut output)
+            .await
+            .unwrap();
 
         let result = String::from_utf8(output).unwrap();
 
@@ -950,7 +995,9 @@ mod tests {
         let mode = create_display_mode(false, false, false);
         let mut output = Vec::new();
 
-        display_pr_table(&prs, &mode, &mut output).await.unwrap();
+        display_pr_table(&prs, &mode, false, &mut output)
+            .await
+            .unwrap();
 
         let result = String::from_utf8(output).unwrap();
         // Should show headers and separator but no data rows - this is informative.

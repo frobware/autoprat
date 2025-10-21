@@ -536,6 +536,7 @@ pub struct QuerySpec {
     pub actions: Vec<Box<dyn Action + Send + Sync>>,
     pub custom_comments: Vec<String>,
     pub throttle: Option<Duration>,
+    pub truncate_titles: bool,
 }
 
 impl QuerySpec {
