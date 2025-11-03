@@ -810,6 +810,34 @@ async fn fetch_prs_with_pagination(
     Ok(all_prs)
 }
 
+/// Verifies that a repository exists on GitHub.
+///
+/// Makes a REST API call to check if the repository is accessible.
+/// Returns an error if the repository doesn't exist or isn't accessible.
+#[instrument(skip(octocrab), fields(repo = %repo))]
+async fn verify_repository_exists(octocrab: &Octocrab, repo: &Repo) -> Result<()> {
+    debug!("Verifying repository exists");
+
+    let result = octocrab.repos(repo.owner(), repo.name()).get().await;
+
+    match result {
+        Ok(_) => {
+            debug!("Repository verified");
+            Ok(())
+        }
+        Err(octocrab::Error::GitHub { source, .. }) => {
+            if source.message.contains("Not Found") {
+                anyhow::bail!("Repository '{}' does not exist or is not accessible", repo)
+            } else {
+                anyhow::bail!("Failed to verify repository '{}': {}", repo, source.message)
+            }
+        }
+        Err(e) => {
+            anyhow::bail!("Failed to verify repository '{}': {}", repo, e)
+        }
+    }
+}
+
 /// Fetches pull request data from GitHub according to the query spec.
 ///
 /// Handles both specific PR queries and search-based queries. Monitors
@@ -840,6 +868,12 @@ async fn fetch_github_data(spec: &crate::types::QuerySpec) -> Result<Vec<PullReq
         fetch_prs_with_pagination(&octocrab, search_query, spec.limit, None).await
     } else if !spec.repos.is_empty() {
         debug!("Fetching PRs from {} repo(s)", spec.repos.len());
+
+        // Verify all repositories exist before attempting to fetch PRs
+        for repo in &spec.repos {
+            verify_repository_exists(&octocrab, repo).await?;
+        }
+
         let mut all_prs = Vec::new();
         for repo in &spec.repos {
             let search_query = repo.build_search_query(&spec.search_filters);
