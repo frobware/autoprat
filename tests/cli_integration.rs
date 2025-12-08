@@ -69,6 +69,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             url: "https://github.com/owner/repo/pull/123".to_string(),
             labels: vec!["dependencies".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -89,6 +90,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             url: "https://github.com/owner/repo/pull/124".to_string(),
             labels: vec!["bug".to_string(), "approved".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -118,6 +120,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             url: "https://github.com/owner/repo/pull/125".to_string(),
             labels: vec!["feature".to_string(), "enhancement".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -147,6 +150,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             url: "https://github.com/owner/repo/pull/126".to_string(),
             labels: vec![],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/lint").unwrap(),
                 conclusion: Some(CheckConclusion::Failure),
@@ -167,6 +171,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             url: "https://github.com/owner/repo/pull/127".to_string(),
             labels: vec!["feature".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -203,6 +208,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             url: "https://github.com/owner/repo/pull/128".to_string(),
             labels: vec!["dependencies".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -227,6 +233,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
                 "approved".to_string(),
             ],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -256,6 +263,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             url: "https://github.com/owner/repo/pull/130".to_string(),
             labels: vec!["needs-ok-to-test".to_string(), "external".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![], // No checks yet, needs ok-to-test first
             recent_comments: vec![],
         },
@@ -270,6 +278,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             url: "https://github.com/owner/repo/pull/131".to_string(),
             labels: vec!["lgtm".to_string(), "bug".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -3128,6 +3137,7 @@ async fn test_multi_repository_urls() {
             url: "https://github.com/acme/web-app/pull/443".to_string(),
             labels: vec!["enhancement".to_string()],
             created_at: Utc::now() - chrono::Duration::weeks(3),
+            base_branch: "main".to_string(),
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/unit-tests").unwrap(),
                 conclusion: None,
@@ -3148,6 +3158,7 @@ async fn test_multi_repository_urls() {
             url: "https://github.com/widgets/api-service/pull/656".to_string(),
             labels: vec!["bug".to_string()],
             created_at: Utc::now() - chrono::Duration::weeks(3),
+            base_branch: "main".to_string(),
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/integration-tests").unwrap(),
@@ -3243,6 +3254,7 @@ async fn test_multi_repository_urls_with_filters() {
             url: "https://github.com/acme/web-app/pull/100".to_string(),
             labels: vec!["feature".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3257,6 +3269,7 @@ async fn test_multi_repository_urls_with_filters() {
             url: "https://github.com/widgets/api-service/pull/200".to_string(),
             labels: vec!["bug".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3271,6 +3284,7 @@ async fn test_multi_repository_urls_with_filters() {
             url: "https://github.com/tools/cli-utils/pull/300".to_string(),
             labels: vec!["documentation".to_string()],
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3332,6 +3346,7 @@ async fn test_multi_repository_urls_with_actions() {
             url: "https://github.com/acme/web-app/pull/100".to_string(),
             labels: vec!["feature".to_string()], // No "approved" label
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3346,6 +3361,7 @@ async fn test_multi_repository_urls_with_actions() {
             url: "https://github.com/widgets/api-service/pull/200".to_string(),
             labels: vec!["bug".to_string(), "approved".to_string()], // Already approved
             created_at: Utc::now(),
+            base_branch: "main".to_string(),
             checks: vec![],
             recent_comments: vec![],
         },

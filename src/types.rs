@@ -385,6 +385,7 @@ pub struct PullRequest {
     pub url: String,
     pub labels: Vec<String>,
     pub created_at: DateTime<Utc>,
+    pub base_branch: String,
 
     // Associated data.
     pub checks: Vec<CheckInfo>,
@@ -416,6 +417,10 @@ impl PullRequest {
 
     pub fn has_label(&self, label: &str) -> bool {
         self.labels.iter().any(|l| l == label)
+    }
+
+    pub fn matches_base_branch(&self, branch: &str) -> bool {
+        self.base_branch == branch
     }
 
     pub fn was_comment_posted_recently(

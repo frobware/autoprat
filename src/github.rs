@@ -414,6 +414,7 @@ struct GraphQLPullRequest {
     title: String,
     url: Url,
     created_at: DateTime<Utc>,
+    base_ref_name: Option<String>,
     author: Option<GraphQLAuthor>,
     labels: GraphQLLabelConnection,
     status_check_rollup: Option<GraphQLStatusCheckRollup>,
@@ -630,6 +631,9 @@ fn convert_graphql_pr_to_pr_info(
             .map(|label| label.name)
             .collect(),
         created_at: graphql_pr.created_at,
+        base_branch: graphql_pr
+            .base_ref_name
+            .ok_or_else(|| anyhow::anyhow!("PR {} missing base branch", graphql_pr.number))?,
         checks,
         recent_comments,
     })
@@ -982,6 +986,7 @@ mod tests {
             title: "Test PR".to_string(),
             url: Url::parse("https://github.com/owner/repo/pull/123").unwrap(),
             created_at: DateTime::from_timestamp(1609459200, 0).unwrap(), // 2021-01-01.
+            base_ref_name: Some("main".to_string()),
             author: Some(GraphQLAuthor {
                 login: "testuser".to_string(),
                 actor_type: ActorType::User,

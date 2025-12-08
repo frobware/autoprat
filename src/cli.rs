@@ -226,6 +226,21 @@ multi_search_filter!(
     }
 );
 
+#[derive(Debug)]
+struct BaseBranchSF {
+    branch: String,
+}
+
+impl SearchFilter for BaseBranchSF {
+    fn apply(&self, terms: &mut Vec<String>) {
+        terms.push(format!("base:{}", self.branch));
+    }
+
+    fn matches(&self, pr: &PullRequest) -> bool {
+        pr.matches_base_branch(&self.branch)
+    }
+}
+
 simple_post_filter!(FailingCiPF, |pr: &PullRequest| { pr.has_failing_ci() });
 
 single_post_filter!(AuthorPF, author, |pr: &PullRequest, name: &str| {
@@ -240,6 +255,10 @@ multi_post_filter!(
 
 single_post_filter!(TitlePF, title, |pr: &PullRequest, title: &str| {
     pr.title.contains(title)
+});
+
+single_post_filter!(BaseBranchPF, base, |pr: &PullRequest, branch: &str| {
+    pr.matches_base_branch(branch)
 });
 
 #[derive(Args, Debug, Clone, Default)]
@@ -302,6 +321,10 @@ struct FilterArgs {
     /// Filter by PR title (case-sensitive substring match)
     #[arg(short = 't', long, help_heading = "Filters", value_name = "TITLE")]
     pub title: Option<String>,
+
+    /// Filter by base/target branch (exact match)
+    #[arg(long, help_heading = "Filters", value_name = "BRANCH")]
+    pub base: Option<String>,
 }
 
 #[derive(Parser, Default, Debug)]
@@ -456,6 +479,12 @@ fn cli_to_search_filters(filter_args: &FilterArgs) -> Vec<Box<dyn SearchFilter +
         }));
     }
 
+    if let Some(branch) = &filter_args.base {
+        out.push(Box::new(BaseBranchSF {
+            branch: branch.clone(),
+        }));
+    }
+
     out
 }
 
@@ -474,6 +503,10 @@ fn cli_to_post_filters(filter_args: &FilterArgs) -> Vec<Box<dyn PostFilter + Sen
     }
     if let Some(title) = &filter_args.title {
         out.push(Box::new(TitlePF::new().with_value(title.clone())));
+    }
+
+    if let Some(branch) = &filter_args.base {
+        out.push(Box::new(BaseBranchPF::new().with_value(branch.clone())));
     }
 
     out

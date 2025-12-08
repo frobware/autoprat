@@ -109,6 +109,12 @@ autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "-do
 # PRs missing approval from specific author, excluding some.
 autoprat -r myorg/myrepo --author "trusted-contributor" --needs-approve --exclude 789
 
+# PRs targeting the main branch.
+autoprat -r myorg/myrepo --base main --needs-approve
+
+# PRs targeting a release branch.
+autoprat -r myorg/myrepo --base release-1.0 --approve | sh
+
 # Raw GitHub search queries for complex filtering.
 # Note: 'is:pr' and 'is:open' are automatically added if not present
 autoprat --query "repo:myorg/myrepo author:dependabot created:>2024-01-01"
@@ -258,6 +264,7 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `--needs-approve` - Missing 'approved' label
 - `--needs-lgtm` - Missing 'lgtm' label
 - `--needs-ok-to-test` - Has 'needs-ok-to-test' label
+- `--base <BRANCH>` - Filter by base/target branch (exact match)
 - `--query <QUERY>` - Raw GitHub search query (automatically adds `is:pr` and `is:open` if not present, mutually exclusive with all other filters and repository specification)
 
 ### Actions

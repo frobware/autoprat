@@ -4,6 +4,7 @@ query($query: String!, $after: String) {
             ... on PullRequest {
                 number
                 title
+                baseRefName
                 url
                 state
                 createdAt

@@ -867,6 +867,7 @@ mod tests {
             url: "https://github.com/owner/repo/pull/101".to_string(),
             labels: vec!["enhancement".to_string(), "approved".to_string()],
             created_at: base_time - chrono::Duration::hours(5),
+            base_branch: "main".to_string(),
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("unit-tests").unwrap(),
