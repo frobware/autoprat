@@ -571,10 +571,10 @@ pub trait Action: std::fmt::Debug + Send + Sync {
             }
 
             // Check throttle
-            if let Some(duration) = throttle {
-                if pr.was_comment_posted_recently(body, duration) {
-                    return false;
-                }
+            if let Some(duration) = throttle
+                && pr.was_comment_posted_recently(body, duration)
+            {
+                return false;
             }
         }
 
