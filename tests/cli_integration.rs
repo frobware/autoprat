@@ -2398,19 +2398,18 @@ async fn test_mixed_actions_with_multiple_comments() {
     assert_eq!(result.filtered_prs.len(), 7);
     // Custom comments should be processed correctly
 
-    // Should have: 7 approve + 6 lgtm (PR 131 already has lgtm) + 14 custom comments = 27 actions
-    assert_eq!(result.executable_actions.len(), 27);
+    // With grouping:
+    // - All 7 PRs get a grouped action (approve+lgtm)
+    // - PR 131's grouped action will only output /approve (lgtm already exists)
+    // - 14 custom comments (2 comments × 7 PRs) = 14
+    // Total = 21 actions
+    assert_eq!(result.executable_actions.len(), 21);
 
     // Count actions by type
-    let approve_actions = result
+    let grouped_actions = result
         .executable_actions
         .iter()
-        .filter(|action| action.action.name() == "approve")
-        .count();
-    let lgtm_actions = result
-        .executable_actions
-        .iter()
-        .filter(|action| action.action.name() == "lgtm")
+        .filter(|action| action.action.name() == "grouped-comment")
         .count();
     let comment_actions = result
         .executable_actions
@@ -2418,8 +2417,8 @@ async fn test_mixed_actions_with_multiple_comments() {
         .filter(|action| action.action.name() == "custom-comment")
         .count();
 
-    assert_eq!(approve_actions, 7);
-    assert_eq!(lgtm_actions, 6); // PR 131 already has lgtm label
+    // All 7 PRs get a grouped action, even though PR 131's will only contain /approve
+    assert_eq!(grouped_actions, 7);
     assert_eq!(comment_actions, 14); // 2 comments × 7 PRs
 }
 
@@ -2643,7 +2642,9 @@ fn test_parse_args_with_slash_commands() {
     assert!(result.is_ok());
 
     let (request, _) = result.unwrap();
-    assert_eq!(request.actions.len(), 3); // approve, lgtm, ok-to-test
+    // With grouping, approve/lgtm/ok-to-test are combined into 1 grouped action
+    assert_eq!(request.actions.len(), 1);
+    assert_eq!(request.actions[0].name(), "grouped-comment");
 }
 
 #[test]

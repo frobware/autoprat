@@ -216,6 +216,69 @@ impl Action for CommentAction {
     }
 }
 
+/// Action that groups multiple comment commands into a single comment.
+///
+/// When multiple comment flags are specified (--approve, --lgtm, --ok-to-test, --retest),
+/// this action combines them into a single GitHub comment with newline-separated commands.
+#[derive(Debug, Clone)]
+pub struct GroupedCommentAction {
+    pub actions: Vec<Box<dyn Action + Send + Sync>>,
+}
+
+impl GroupedCommentAction {
+    pub fn new(actions: Vec<Box<dyn Action + Send + Sync>>) -> Self {
+        Self { actions }
+    }
+}
+
+impl Action for GroupedCommentAction {
+    fn name(&self) -> &'static str {
+        "grouped-comment"
+    }
+
+    fn only_if(&self, pr_info: &PullRequest) -> bool {
+        // Execute if ANY of the grouped actions should execute
+        self.actions.iter().any(|action| action.only_if(pr_info))
+    }
+
+    fn get_comment_body(&self) -> Option<&str> {
+        // No single body - we have multiple commands
+        None
+    }
+
+    fn clone_box(&self) -> Box<dyn Action + Send + Sync> {
+        Box::new(self.clone())
+    }
+
+    fn format_shell_command(&self, pr_info: &PullRequest) -> String {
+        // Get valid commands and join them
+        let valid_commands: Vec<String> = self
+            .actions
+            .iter()
+            .filter(|action| action.only_if(pr_info))
+            .filter_map(|action| action.get_comment_body())
+            .map(String::from)
+            .collect();
+
+        let combined_body = valid_commands.join("\\n");
+        // Use $'...' syntax to interpret escape sequences like \n as actual newlines
+        format!("gh pr comment {} --body $'{}'", pr_info.url, combined_body)
+    }
+
+    fn should_execute(
+        &self,
+        pr: &PullRequest,
+        history_max_comments: usize,
+        history_max_age: Duration,
+        throttle: Option<Duration>,
+    ) -> bool {
+        // Execute if ANY of the grouped actions should execute
+        self.actions.iter().any(|action| {
+            action.should_execute(pr, history_max_comments, history_max_age, throttle)
+        })
+    }
+}
+
 simple_search_filter!(
     NeedsApproveSF,
     |terms: &mut Vec<String>| terms.push("-label:approved".into()),
@@ -479,29 +542,47 @@ fn cli_to_actions(
     opts: &ActionArgs,
     custom_comments: &[String],
 ) -> Vec<Box<dyn Action + Send + Sync>> {
-    let mut out: Vec<Box<dyn Action + Send + Sync>> = Vec::new();
+    let mut comment_actions: Vec<Box<dyn Action + Send + Sync>> = Vec::new();
+    let mut all_actions = Vec::new();
+
+    // Collect comment actions
     if opts.approve {
-        out.push(Box::new(Approve));
+        comment_actions.push(Box::new(Approve) as Box<dyn Action + Send + Sync>);
     }
     if opts.lgtm {
-        out.push(Box::new(Lgtm));
+        comment_actions.push(Box::new(Lgtm) as Box<dyn Action + Send + Sync>);
     }
     if opts.ok_to_test {
-        out.push(Box::new(OkToTest));
+        comment_actions.push(Box::new(OkToTest) as Box<dyn Action + Send + Sync>);
     }
     if opts.retest {
-        out.push(Box::new(Retest));
+        comment_actions.push(Box::new(Retest) as Box<dyn Action + Send + Sync>);
     }
+
+    // Group or use individual actions
+    match comment_actions.len() {
+        0 => {}
+        1 => {
+            all_actions.push(comment_actions.into_iter().next().unwrap());
+        }
+        _ => {
+            // Multiple comment actions - group them!
+            all_actions.push(Box::new(GroupedCommentAction::new(comment_actions))
+                as Box<dyn Action + Send + Sync>);
+        }
+    }
+
+    // Handle non-comment actions
     if opts.close {
-        out.push(Box::new(Close));
+        all_actions.push(Box::new(Close) as Box<dyn Action + Send + Sync>);
     }
 
     // Convert custom comments to CommentAction objects
     for comment in custom_comments {
-        out.push(Box::new(CommentAction::new(comment.clone())));
+        all_actions.push(Box::new(CommentAction::new(comment.clone())));
     }
 
-    out
+    all_actions
 }
 
 fn cli_to_search_filters(filter_args: &FilterArgs) -> Vec<Box<dyn SearchFilter + Send + Sync>> {
