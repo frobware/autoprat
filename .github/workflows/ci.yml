@@ -13,7 +13,7 @@ jobs:
   ci:
     name: CI Pipeline
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -61,40 +61,7 @@ jobs:
     - name: Build release
       run: cargo build --release
 
-  # Test on multiple platforms
-  test-platforms:
-    name: Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Cache Cargo dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Build
-      run: cargo build --release
-
-    - name: Run tests
-      run: cargo test
-
     - name: Test CLI functionality
-      shell: bash
       run: |
         ./target/release/autoprat --version
         ./target/release/autoprat --help
