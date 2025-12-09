@@ -346,3 +346,5 @@ cp target/release/autoprat ~/.local/bin/autoprat
 ## License
 
 MIT
+
+<!-- Test comment for branch protection setup -->
