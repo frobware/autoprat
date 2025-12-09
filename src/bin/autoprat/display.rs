@@ -195,15 +195,7 @@ fn format_ci_status(status: &CiStatus) -> String {
 }
 
 fn format_shell_command(action: &dyn Action, pr_info: &PullRequest) -> String {
-    match action.get_comment_body() {
-        Some(comment_body) => {
-            format!("gh pr comment {} --body \"{}\"", pr_info.url, comment_body)
-        }
-        None => match action.name() {
-            "close" => format!("gh pr close {}", pr_info.url),
-            _ => format!("# Unknown action: {}", action.name()),
-        },
-    }
+    action.format_shell_command(pr_info)
 }
 
 fn format_relative_time(time: DateTime<Utc>) -> String {

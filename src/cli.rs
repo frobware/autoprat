@@ -148,7 +148,41 @@ define_action!(
 
 define_action!(Retest, "retest", |_| true, Some("/retest"));
 
-define_action!(Close, "close", |_| true, None);
+#[derive(Debug, Clone)]
+struct Close;
+
+impl Action for Close {
+    fn name(&self) -> &'static str {
+        "close"
+    }
+
+    fn only_if(&self, _pr_info: &PullRequest) -> bool {
+        true
+    }
+
+    fn get_comment_body(&self) -> Option<&str> {
+        None
+    }
+
+    fn clone_box(&self) -> Box<dyn Action + Send + Sync> {
+        Box::new(self.clone())
+    }
+
+    fn format_shell_command(&self, pr_info: &PullRequest) -> String {
+        format!("gh pr close {}", pr_info.url)
+    }
+
+    fn should_execute(
+        &self,
+        pr: &PullRequest,
+        _history_max_comments: usize,
+        _history_max_age: Duration,
+        _throttle: Option<Duration>,
+    ) -> bool {
+        // Close is not idempotent/throttled - always execute if only_if returns true
+        self.only_if(pr)
+    }
+}
 
 /// Action that posts a custom comment on a pull request.
 ///
@@ -441,7 +475,10 @@ impl CliArgs {
     }
 }
 
-fn cli_to_actions(opts: &ActionArgs) -> Vec<Box<dyn Action + Send + Sync>> {
+fn cli_to_actions(
+    opts: &ActionArgs,
+    custom_comments: &[String],
+) -> Vec<Box<dyn Action + Send + Sync>> {
     let mut out: Vec<Box<dyn Action + Send + Sync>> = Vec::new();
     if opts.approve {
         out.push(Box::new(Approve));
@@ -458,6 +495,12 @@ fn cli_to_actions(opts: &ActionArgs) -> Vec<Box<dyn Action + Send + Sync>> {
     if opts.close {
         out.push(Box::new(Close));
     }
+
+    // Convert custom comments to CommentAction objects
+    for comment in custom_comments {
+        out.push(Box::new(CommentAction::new(comment.clone())));
+    }
+
     out
 }
 
@@ -675,8 +718,7 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
         limit: cli.limit,
         search_filters: cli_to_search_filters(&cli.filters),
         post_filters: cli_to_post_filters(&cli.filters),
-        actions: cli_to_actions(&cli.actions),
-        custom_comments: cli.comment,
+        actions: cli_to_actions(&cli.actions, &cli.comment),
         throttle,
         history_max_age,
         history_max_comments,

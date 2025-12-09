@@ -539,6 +539,47 @@ pub trait Action: std::fmt::Debug + Send + Sync {
     fn only_if(&self, pr_info: &PullRequest) -> bool;
     fn get_comment_body(&self) -> Option<&str>;
     fn clone_box(&self) -> Box<dyn Action + Send + Sync>;
+
+    /// Format the shell command to execute this action.
+    /// Each action knows how to execute itself - no hardcoded matching needed.
+    fn format_shell_command(&self, pr_info: &PullRequest) -> String {
+        // Default implementation for comment actions
+        if let Some(body) = self.get_comment_body() {
+            format!("gh pr comment {} --body \"{}\"", pr_info.url, body)
+        } else {
+            format!("# Unknown action: {}", self.name())
+        }
+    }
+
+    /// Should this action be executed given the PR state and history?
+    /// Default checks comment history and throttling for comment actions.
+    fn should_execute(
+        &self,
+        pr: &PullRequest,
+        history_max_comments: usize,
+        history_max_age: Duration,
+        throttle: Option<Duration>,
+    ) -> bool {
+        if !self.only_if(pr) {
+            return false;
+        }
+
+        if let Some(body) = self.get_comment_body() {
+            // Check history
+            if pr.was_comment_posted_in_history(body, history_max_comments, history_max_age) {
+                return false;
+            }
+
+            // Check throttle
+            if let Some(duration) = throttle {
+                if pr.was_comment_posted_recently(body, duration) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
 }
 
 #[derive(Debug)]
@@ -581,7 +622,6 @@ pub struct QuerySpec {
     pub search_filters: Vec<Box<dyn SearchFilter + Send + Sync>>,
     pub post_filters: Vec<Box<dyn PostFilter + Send + Sync>>,
     pub actions: Vec<Box<dyn Action + Send + Sync>>,
-    pub custom_comments: Vec<String>,
     pub throttle: Option<Duration>,
     pub history_max_age: Duration,
     pub history_max_comments: usize,
@@ -590,7 +630,7 @@ pub struct QuerySpec {
 
 impl QuerySpec {
     pub fn has_actions(&self) -> bool {
-        !self.actions.is_empty() || !self.custom_comments.is_empty()
+        !self.actions.is_empty()
     }
 }
 

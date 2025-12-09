@@ -2619,9 +2619,13 @@ fn test_parse_args_and_create_request_from() {
     let (request, display_mode) = result.unwrap();
     assert_eq!(request.repos.len(), 1);
     assert_eq!(request.repos[0].to_string(), "owner/repo");
-    assert_eq!(request.actions.len(), 1);
-    assert_eq!(request.custom_comments.len(), 1);
-    assert_eq!(request.custom_comments[0], "Test comment");
+    // Both approve and custom comment are now in actions vector
+    assert_eq!(request.actions.len(), 2);
+    // First action should be approve
+    assert_eq!(request.actions[0].name(), "approve");
+    // Second action should be the custom comment
+    assert_eq!(request.actions[1].name(), "custom-comment");
+    assert_eq!(request.actions[1].get_comment_body(), Some("Test comment"));
     assert_eq!(display_mode, DisplayMode::Normal);
 }
 
