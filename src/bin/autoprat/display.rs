@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    io::{self, IsTerminal, Write},
-    time::Duration,
-};
+use std::{collections::HashMap, io::Write, time::Duration};
 
 use anyhow::Result;
 use autoprat::{
@@ -258,10 +254,7 @@ const TABLE_HEADERS: &[&str] = &[
     "CREATED AT",
     "TITLE",
 ];
-const TITLE_COLUMN_INDEX: usize = TABLE_HEADERS.len() - 1;
 const COLUMN_SEPARATOR: &str = "  ";
-const TITLE_TRUNCATION_SUFFIX: &str = "...";
-const MIN_TITLE_WIDTH_FOR_TRUNCATION: usize = 3;
 
 /// Query terminal width from /dev/tty using ioctl.
 /// This works even when stdout is redirected (e.g., in watch or pager).
@@ -288,23 +281,34 @@ fn query_tty_width() -> Option<usize> {
 }
 
 fn get_terminal_width(width_override: Option<usize>, force_truncate: bool) -> usize {
+    // Explicit width override takes priority (internal API, not exposed to CLI)
     if let Some(width) = width_override {
-        width
-    } else if io::stdout().is_terminal() {
-        terminal_size::terminal_size()
-            .map(|(w, _)| w.0 as usize)
-            .unwrap_or(usize::MAX)
-    } else if force_truncate {
-        // When not a TTY but --no-wrap is set, try multiple methods:
-        // 1. Query /dev/tty directly (works even when stdout is redirected like in watch)
-        // 2. Check COLUMNS env var (set by watch/shell)
-        // 3. Final fallback to MAX (no truncation) if we truly can't detect width
-        query_tty_width()
-            .or_else(|| std::env::var("COLUMNS").ok().and_then(|c| c.parse().ok()))
-            .unwrap_or(usize::MAX)
-    } else {
-        usize::MAX
+        return width;
     }
+
+    // Only truncate if -S/--chop-long-lines is set
+    if !force_truncate {
+        return usize::MAX;
+    }
+
+    // COLUMNS env var is explicit user intent, honour it first
+    if let Ok(cols) = std::env::var("COLUMNS")
+        && let Ok(width) = cols.parse()
+    {
+        return width;
+    }
+
+    // Try terminal_size crate (works when stdout is a TTY)
+    if let Some((w, _)) = terminal_size::terminal_size() {
+        return w.0 as usize;
+    }
+
+    // Query /dev/tty directly (works even when stdout is redirected)
+    if let Some(width) = query_tty_width() {
+        return width;
+    }
+
+    usize::MAX
 }
 
 fn pr_to_table_row(pr: &PullRequest) -> Vec<String> {
@@ -359,81 +363,55 @@ fn calculate_column_widths(headers: &[&str], rows: &[Vec<String>]) -> Vec<usize>
     widths
 }
 
-fn apply_title_truncation(rows: &mut [Vec<String>], widths: &mut [usize], terminal_width: usize) {
-    if terminal_width == usize::MAX {
-        return;
+fn chop_line(line: &str, max_width: usize) -> String {
+    if max_width == usize::MAX || line.len() <= max_width {
+        line.to_string()
+    } else {
+        line[..max_width].to_string()
     }
+}
 
-    let separator_width = COLUMN_SEPARATOR.len() * (widths.len() - 1);
-    let non_title_width: usize =
-        widths[..TITLE_COLUMN_INDEX].iter().sum::<usize>() + separator_width;
-
-    if non_title_width >= terminal_width {
-        return;
-    }
-
-    let available_title_width = terminal_width - non_title_width - COLUMN_SEPARATOR.len();
-    let max_title_width = rows
+fn format_row(cells: &[&str], widths: &[usize]) -> String {
+    cells
         .iter()
-        .map(|row| row.get(TITLE_COLUMN_INDEX).map_or(0, |s| s.len()))
-        .max()
-        .unwrap_or(0);
-
-    if max_title_width > available_title_width
-        && available_title_width > MIN_TITLE_WIDTH_FOR_TRUNCATION
-    {
-        widths[TITLE_COLUMN_INDEX] = available_title_width;
-
-        for row in rows {
-            if let Some(title) = row.get_mut(TITLE_COLUMN_INDEX)
-                && title.len() > available_title_width
-            {
-                let truncate_at = available_title_width - TITLE_TRUNCATION_SUFFIX.len();
-                *title = format!("{}{}", &title[..truncate_at], TITLE_TRUNCATION_SUFFIX);
-            }
-        }
-    }
+        .enumerate()
+        .map(|(i, cell)| format!("{:<width$}", cell, width = widths[i]))
+        .collect::<Vec<_>>()
+        .join(COLUMN_SEPARATOR)
 }
 
 fn render_table_headers<W: Write>(
     headers: &[&str],
     widths: &[usize],
+    terminal_width: usize,
     writer: &mut W,
 ) -> Result<()> {
-    for (i, header) in headers.iter().enumerate() {
-        write!(writer, "{:<width$}", header, width = widths[i])?;
-        if i < headers.len() - 1 {
-            write!(writer, "{COLUMN_SEPARATOR}")?;
-        }
-    }
-    writeln!(writer)?;
+    let line = format_row(headers, widths);
+    writeln!(writer, "{}", chop_line(&line, terminal_width))?;
     Ok(())
 }
 
-fn render_table_separator<W: Write>(widths: &[usize], writer: &mut W) -> Result<()> {
-    for (i, &width) in widths.iter().enumerate() {
-        write!(writer, "{}", "-".repeat(width))?;
-        if i < widths.len() - 1 {
-            write!(writer, "{COLUMN_SEPARATOR}")?;
-        }
-    }
-    writeln!(writer)?;
+fn render_table_separator<W: Write>(
+    widths: &[usize],
+    terminal_width: usize,
+    writer: &mut W,
+) -> Result<()> {
+    let separators: Vec<String> = widths.iter().map(|&w| "-".repeat(w)).collect();
+    let line = separators.join(COLUMN_SEPARATOR);
+    writeln!(writer, "{}", chop_line(&line, terminal_width))?;
     Ok(())
 }
 
 fn render_table_rows<W: Write>(
     rows: &[Vec<String>],
     widths: &[usize],
+    terminal_width: usize,
     writer: &mut W,
 ) -> Result<()> {
     for row in rows {
-        for (i, cell) in row.iter().enumerate() {
-            write!(writer, "{:<width$}", cell, width = widths[i])?;
-            if i < row.len() - 1 {
-                write!(writer, "{COLUMN_SEPARATOR}")?;
-            }
-        }
-        writeln!(writer)?;
+        let cells: Vec<&str> = row.iter().map(|s| s.as_str()).collect();
+        let line = format_row(&cells, widths);
+        writeln!(writer, "{}", chop_line(&line, terminal_width))?;
     }
     Ok(())
 }
@@ -445,14 +423,12 @@ fn display_prs_table_with_width<W: Write>(
     force_truncate: bool,
 ) -> Result<()> {
     let terminal_width = get_terminal_width(width_override, force_truncate);
-    let mut rows = prs_to_table_rows(prs);
-    let mut widths = calculate_column_widths(TABLE_HEADERS, &rows);
+    let rows = prs_to_table_rows(prs);
+    let widths = calculate_column_widths(TABLE_HEADERS, &rows);
 
-    apply_title_truncation(&mut rows, &mut widths, terminal_width);
-
-    render_table_headers(TABLE_HEADERS, &widths, writer)?;
-    render_table_separator(&widths, writer)?;
-    render_table_rows(&rows, &widths, writer)?;
+    render_table_headers(TABLE_HEADERS, &widths, terminal_width, writer)?;
+    render_table_separator(&widths, terminal_width, writer)?;
+    render_table_rows(&rows, &widths, terminal_width, writer)?;
 
     Ok(())
 }
