@@ -488,9 +488,9 @@ struct CliArgs {
     #[arg(short = 'L', long, default_value = "30", value_name = "NUM")]
     pub limit: usize,
 
-    /// Force title truncation even when not a TTY (useful with watch command)
-    #[arg(long)]
-    pub no_wrap: bool,
+    /// Truncate long lines to fit terminal width (like less -S)
+    #[arg(short = 'S', long = "chop-long-lines")]
+    pub chop_long_lines: bool,
 }
 
 impl CliArgs {
@@ -803,7 +803,7 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
         throttle,
         history_max_age,
         history_max_comments,
-        truncate_titles: cli.no_wrap,
+        truncate_titles: cli.chop_long_lines,
     })
 }
 

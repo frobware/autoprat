@@ -281,9 +281,9 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `-D, --detailed-with-logs` - Show detailed PR information with error logs from failing checks
 - `-q, --quiet` - Print PR numbers only
 - `-L, --limit <LIMIT>` - Limit the number of PRs to process [default: 30]
-- `--no-wrap` - Enable title truncation when output is redirected (for use with `watch`, pagers, or pipes)
+- `-S, --chop-long-lines` - Chop long lines at terminal width (like `less -S`)
 
-**When to use `--no-wrap`:** By default, autoprat detects terminal width only when stdout is a TTY. When using tools like `watch` or piping output, stdout is redirected and autoprat cannot detect the terminal width, causing long titles to wrap. The `--no-wrap` flag forces width detection by querying `/dev/tty` directly (the controlling terminal), ensuring titles are properly truncated even when output is redirected.
+**When to use `-S`:** By default, autoprat outputs full lines which may wrap on narrow terminals. The `-S` flag chops lines at the terminal width. Width is determined in priority order: `COLUMNS` environment variable (if set), terminal size detection, or `/dev/tty` query (for redirected output like `watch`). Override the detected width with `COLUMNS=120 autoprat -S`.
 
 ### Debugging
 Use the `RUST_LOG` environment variable for granular tracing:
@@ -341,7 +341,7 @@ cp target/release/autoprat ~/.local/bin/autoprat
 6. **Combine filters** - Multiple filters use AND logic for precise targeting
 7. **Exact check names** - Use `--failing-check` with exact CI check names for safety
 8. **Script the common cases** - Save frequent filter combinations as shell aliases
-9. **Use with watch** - Monitor PRs continuously: `watch -n 180 "autoprat -r org/repo --no-wrap"` or across multiple repos: `watch -n 180 "autoprat -r org/repo1 -r org/repo2 --failing-ci --no-wrap"` (180s interval recommended to avoid rate limiting)
+9. **Use with watch** - Monitor PRs continuously: `watch -n 180 "autoprat -r org/repo -S"` or across multiple repos: `watch -n 180 "autoprat -r org/repo1 -r org/repo2 --failing-ci -S"` (180s interval recommended to avoid rate limiting)
 
 ## License
 
