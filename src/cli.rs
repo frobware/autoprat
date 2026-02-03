@@ -184,6 +184,42 @@ impl Action for Close {
     }
 }
 
+#[derive(Debug, Clone)]
+struct Merge;
+
+impl Action for Merge {
+    fn name(&self) -> &'static str {
+        "merge"
+    }
+
+    fn only_if(&self, _pr_info: &PullRequest) -> bool {
+        true
+    }
+
+    fn get_comment_body(&self) -> Option<&str> {
+        None
+    }
+
+    fn clone_box(&self) -> Box<dyn Action + Send + Sync> {
+        Box::new(self.clone())
+    }
+
+    fn format_shell_command(&self, pr_info: &PullRequest) -> String {
+        format!("gh pr merge --merge {}", pr_info.url)
+    }
+
+    fn should_execute(
+        &self,
+        pr: &PullRequest,
+        _history_max_comments: usize,
+        _history_max_age: Duration,
+        _throttle: Option<Duration>,
+    ) -> bool {
+        // Merge is not idempotent/throttled - always execute if only_if returns true
+        self.only_if(pr)
+    }
+}
+
 /// Action that posts a custom comment on a pull request.
 ///
 /// Allows arbitrary comment text to be posted, with optional throttling
@@ -379,6 +415,10 @@ struct ActionArgs {
     /// Close PRs
     #[arg(long, help_heading = "Actions")]
     pub close: bool,
+
+    /// Merge PRs
+    #[arg(long, help_heading = "Actions")]
+    pub merge: bool,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -575,6 +615,9 @@ fn cli_to_actions(
     // Handle non-comment actions
     if opts.close {
         all_actions.push(Box::new(Close) as Box<dyn Action + Send + Sync>);
+    }
+    if opts.merge {
+        all_actions.push(Box::new(Merge) as Box<dyn Action + Send + Sync>);
     }
 
     // Convert custom comments to CommentAction objects
@@ -815,6 +858,7 @@ fn transform_slash_commands(args: Vec<String>) -> Vec<String> {
             "/ok-to-test" => "--ok-to-test".to_string(),
             "/retest" => "--retest".to_string(),
             "/close" => "--close".to_string(),
+            "/merge" => "--merge".to_string(),
             _ => arg,
         })
         .collect()
