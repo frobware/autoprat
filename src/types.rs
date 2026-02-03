@@ -273,7 +273,7 @@ impl Repo {
         &self,
         search_filters: &[Box<dyn SearchFilter + Send + Sync>],
     ) -> String {
-        let mut parts = Vec::with_capacity(search_filters.len() + 3); // Base terms plus filters.
+        let mut parts = Vec::with_capacity(search_filters.len() + 4); // Base terms plus filters.
 
         parts.push(format!("repo:{self}"));
 
@@ -283,6 +283,7 @@ impl Repo {
 
         parts.push("type:pr".to_string());
         parts.push("state:open".to_string());
+        parts.push("sort:created-asc".to_string());
 
         parts.join(" ")
     }
