@@ -8,6 +8,9 @@ query($query: String!, $after: String) {
                 url
                 state
                 createdAt
+                commits {
+                    totalCount
+                }
                 author {
                     login
                     __typename

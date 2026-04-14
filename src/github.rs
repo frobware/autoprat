@@ -415,10 +415,17 @@ struct GraphQLPullRequest {
     url: Url,
     created_at: DateTime<Utc>,
     base_ref_name: Option<String>,
+    commits: GraphQLCommitConnection,
     author: Option<GraphQLAuthor>,
     labels: GraphQLLabelConnection,
     status_check_rollup: Option<GraphQLStatusCheckRollup>,
     comments: GraphQLCommentConnection,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphQLCommitConnection {
+    total_count: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -634,6 +641,7 @@ fn convert_graphql_pr_to_pr_info(
         base_branch: graphql_pr
             .base_ref_name
             .ok_or_else(|| anyhow::anyhow!("PR {} missing base branch", graphql_pr.number))?,
+        commit_count: graphql_pr.commits.total_count,
         checks,
         recent_comments,
     })
@@ -987,6 +995,7 @@ mod tests {
             url: Url::parse("https://github.com/owner/repo/pull/123").unwrap(),
             created_at: DateTime::from_timestamp(1609459200, 0).unwrap(), // 2021-01-01.
             base_ref_name: Some("main".to_string()),
+            commits: GraphQLCommitConnection { total_count: 1 },
             author: Some(GraphQLAuthor {
                 login: "testuser".to_string(),
                 actor_type: ActorType::User,
