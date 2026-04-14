@@ -70,6 +70,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             labels: vec!["dependencies".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -91,6 +92,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             labels: vec!["bug".to_string(), "approved".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -121,6 +123,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             labels: vec!["feature".to_string(), "enhancement".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -151,6 +154,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             labels: vec![],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/lint").unwrap(),
                 conclusion: Some(CheckConclusion::Failure),
@@ -172,6 +176,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             labels: vec!["feature".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -209,6 +214,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             labels: vec!["dependencies".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -234,6 +240,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             ],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -264,6 +271,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             labels: vec!["needs-ok-to-test".to_string(), "external".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![], // No checks yet, needs ok-to-test first
             recent_comments: vec![],
         },
@@ -279,6 +287,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             labels: vec!["lgtm".to_string(), "bug".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -3143,6 +3152,7 @@ async fn test_multi_repository_urls() {
             labels: vec!["enhancement".to_string()],
             created_at: Utc::now() - chrono::Duration::weeks(3),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/unit-tests").unwrap(),
                 conclusion: None,
@@ -3164,6 +3174,7 @@ async fn test_multi_repository_urls() {
             labels: vec!["bug".to_string()],
             created_at: Utc::now() - chrono::Duration::weeks(3),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/integration-tests").unwrap(),
@@ -3260,6 +3271,7 @@ async fn test_multi_repository_urls_with_filters() {
             labels: vec!["feature".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3275,6 +3287,7 @@ async fn test_multi_repository_urls_with_filters() {
             labels: vec!["bug".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3290,6 +3303,7 @@ async fn test_multi_repository_urls_with_filters() {
             labels: vec!["documentation".to_string()],
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3352,6 +3366,7 @@ async fn test_multi_repository_urls_with_actions() {
             labels: vec!["feature".to_string()], // No "approved" label
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3367,6 +3382,7 @@ async fn test_multi_repository_urls_with_actions() {
             labels: vec!["bug".to_string(), "approved".to_string()], // Already approved
             created_at: Utc::now(),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![],
             recent_comments: vec![],
         },

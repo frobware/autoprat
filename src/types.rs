@@ -387,6 +387,7 @@ pub struct PullRequest {
     pub labels: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub base_branch: String,
+    pub commit_count: u64,
 
     // Associated data.
     pub checks: Vec<CheckInfo>,

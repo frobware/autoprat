@@ -250,6 +250,7 @@ const TABLE_HEADERS: &[&str] = &[
     "LGTM",
     "OK2TST",
     "HOLD",
+    "COMMITS",
     "AUTHOR",
     "CREATED AT",
     "TITLE",
@@ -339,6 +340,7 @@ fn pr_to_table_row(pr: &PullRequest) -> Vec<String> {
         lgtm.to_string(),
         ok2test.to_string(),
         hold.to_string(),
+        pr.commit_count.to_string(),
         pr.author_simple_name.clone(),
         format_relative_time(pr.created_at),
         pr.title.clone(),
@@ -836,6 +838,7 @@ mod tests {
             labels: vec!["enhancement".to_string(), "approved".to_string()],
             created_at: base_time - chrono::Duration::hours(5),
             base_branch: "main".to_string(),
+            commit_count: 1,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("unit-tests").unwrap(),
