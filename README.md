@@ -10,6 +10,7 @@ You maintain a busy repository. Every day you need to:
 - Approve PRs from trusted contributors like Dependabot
 - Give `/ok-to-test` to PRs that need it
 - Comment on failing PRs to restart CI
+- Hold PRs during a freeze, merge the ones that are ready
 - Find PRs missing reviews
 
 Opening each PR in a browser tab gets old fast.
@@ -30,6 +31,8 @@ autoprat -r owner/repo --author dependabot --approve | sh
 ```
 
 autoprat queries GitHub once, applies your filters, and outputs standard `gh` commands you can review before running.
+
+**Prow users:** actions accept the same slash syntax you already use in PR comments. `autoprat -r repo /hold` is equivalent to `autoprat -r repo --hold` — same for `/approve`, `/lgtm`, `/ok-to-test`, `/close`, `/merge`, and `/retest`.
 
 ## Quick Start
 
@@ -75,6 +78,15 @@ autoprat -r myorg/myrepo --author dependabot --approve | sh
 autoprat -r myorg/myrepo --needs-ok-to-test --ok-to-test | sh
 ```
 
+### Holding and Merging
+```bash
+# Put a hold on all PRs touching the API while you investigate.
+autoprat -r myorg/myrepo --title "(?i)api" --hold | sh
+
+# Merge approved Dependabot PRs.
+autoprat -r myorg/myrepo --author dependabot --label approved --label lgtm --merge | sh
+```
+
 ### CI Firefighting
 ```bash
 # Find failing PRs.
@@ -102,6 +114,12 @@ autoprat -r myorg/myrepo --failing-ci --author "external-contributor" \
 ```bash
 # PRs from specific author that need LGTM.
 autoprat -r myorg/myrepo --needs-lgtm --author "dependabot"
+
+# PRs with "bump" in the title.
+autoprat -r myorg/myrepo --title "bump"
+
+# Case-insensitive title search.
+autoprat -r myorg/myrepo --title "(?i)breaking change"
 
 # High priority bugs without holds.
 autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "-do-not-merge/hold"
@@ -189,7 +207,7 @@ Built-in actions are smart and safe to run repeatedly:
 autoprat -r myorg/myrepo --approve | sh
 ```
 
-The conditional actions (`--approve`, `--lgtm`, `--ok-to-test`) check existing labels and only generate commands when appropriate, whilst `--close` and `--retest` always execute when specified. Perfect for automation - no duplicate comments, no spam.
+The conditional actions (`--approve`, `--lgtm`, `--ok-to-test`, `--hold`) check existing labels and only generate commands when appropriate, whilst `--close`, `--merge`, and `--retest` always execute when specified. Perfect for automation - no duplicate comments, no spam.
 
 ### Comment Throttling
 Prevent spam when running in loops:
@@ -265,16 +283,21 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `--needs-lgtm` - Missing 'lgtm' label
 - `--needs-ok-to-test` - Has 'needs-ok-to-test' label
 - `--base <BRANCH>` - Filter by base/target branch (exact match)
+- `--title <PATTERN>` - Filter by PR title (regex, e.g. `"(?i)fix"`, `"dashboard|auth"`; plain substrings work too)
 - `--query <QUERY>` - Raw GitHub search query (automatically adds `is:pr` and `is:open` if not present, mutually exclusive with all other filters and repository specification)
 
 ### Actions
 - `--approve` - Generate `/approve` comments
 - `--lgtm` - Generate `/lgtm` comments
 - `--ok-to-test` - Generate `/ok-to-test` comments
+- `--hold` - Generate `/hold` comments
 - `--close` - Close PRs
+- `--merge` - Merge PRs
 - `--retest` - Generate `/retest` comments
 - `--comment <COMMENT>` - Generate custom comment commands (can specify multiple)
 - `--throttle <THROTTLE>` - Skip if same comment posted recently (e.g. `5m`, `1h`)
+
+All actions also accept Prow-style slash syntax (`/hold`, `/approve`, etc.) — see note above.
 
 ### Output
 - `-d, --detailed` - Show detailed PR information
