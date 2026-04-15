@@ -148,6 +148,13 @@ define_action!(
 
 define_action!(Retest, "retest", |_| true, Some("/retest"));
 
+define_action!(
+    Hold,
+    "hold",
+    |pr: &PullRequest| !pr.has_label("do-not-merge/hold"),
+    Some("/hold")
+);
+
 #[derive(Debug, Clone)]
 struct Close;
 
@@ -419,6 +426,10 @@ struct ActionArgs {
     /// Merge PRs
     #[arg(long, help_heading = "Actions")]
     pub merge: bool,
+
+    /// Post /hold comments
+    #[arg(long, help_heading = "Actions")]
+    pub hold: bool,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -597,6 +608,9 @@ fn cli_to_actions(
     }
     if opts.retest {
         comment_actions.push(Box::new(Retest) as Box<dyn Action + Send + Sync>);
+    }
+    if opts.hold {
+        comment_actions.push(Box::new(Hold) as Box<dyn Action + Send + Sync>);
     }
 
     // Group or use individual actions
@@ -859,6 +873,7 @@ fn transform_slash_commands(args: Vec<String>) -> Vec<String> {
             "/retest" => "--retest".to_string(),
             "/close" => "--close".to_string(),
             "/merge" => "--merge".to_string(),
+            "/hold" => "--hold".to_string(),
             _ => arg,
         })
         .collect()
