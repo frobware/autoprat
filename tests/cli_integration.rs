@@ -3857,3 +3857,145 @@ async fn test_exclude_comma_separated_edge_cases() {
     assert!(!pr_numbers.contains(&124));
     assert!(!pr_numbers.contains(&125));
 }
+
+#[tokio::test]
+async fn test_action_hold() {
+    // Test that --hold action creates the correct comment action for all PRs
+    // (none of the mock PRs have do-not-merge/hold label)
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--hold"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    // All 9 PRs should get the hold action since none have do-not-merge/hold
+    assert_eq!(result.executable_actions.len(), 9);
+
+    // All actions should be "hold" comment actions
+    for action in &result.executable_actions {
+        assert_eq!(action.action.name(), "hold");
+        assert_eq!(action.action.get_comment_body(), Some("/hold"));
+    }
+}
+
+#[tokio::test]
+async fn test_action_hold_skips_already_held_prs() {
+    // Test that --hold skips PRs that already have do-not-merge/hold label
+    let mut mock_data = create_mock_github_data();
+
+    // Add do-not-merge/hold label to PR 123
+    mock_data[0].labels.push("do-not-merge/hold".to_string());
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--hold"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    // PR 123 should be skipped, remaining 8 PRs should get the action
+    assert_eq!(result.executable_actions.len(), 8);
+
+    let held_pr_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(held_pr_actions, 0);
+}
+
+#[tokio::test]
+async fn test_action_hold_idempotent_comment_history() {
+    // Test: /hold should check comment history to avoid re-posting
+    let mut mock_data = create_mock_github_data();
+
+    // Add /hold comment to PR 123 from 10 minutes ago
+    mock_data[0].recent_comments.push(CommentInfo {
+        body: "/hold".to_string(),
+        created_at: Utc::now() - chrono::Duration::minutes(10),
+    });
+
+    // PR 123 does NOT have do-not-merge/hold label (simulating slow GitHub)
+    mock_data[0].labels.retain(|l| l != "do-not-merge/hold");
+
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--hold"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    // PR 123 should NOT have a hold action because we already posted /hold
+    let pr_123_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.pr_info.number == 123)
+        .count();
+    assert_eq!(pr_123_actions, 0);
+
+    // Other PRs should still get the action
+    assert_eq!(result.executable_actions.len(), 8);
+}
+
+#[test]
+fn test_hold_slash_command() {
+    // Test that /hold slash command is transformed to --hold
+    let result =
+        parse_args_and_create_request_from(vec!["autoprat", "--repo", "owner/repo", "/hold"]);
+    assert!(result.is_ok());
+
+    let (request, _) = result.unwrap();
+    assert_eq!(request.actions.len(), 1);
+    assert_eq!(request.actions[0].name(), "hold");
+}
+
+#[test]
+fn test_hold_action_parses() {
+    // Test: --hold flag should add hold action
+    let result =
+        parse_args_and_create_request_from(vec!["autoprat", "--repo", "owner/repo", "--hold"]);
+    assert!(result.is_ok());
+
+    let (request, _) = result.unwrap();
+    assert_eq!(request.actions.len(), 1);
+    assert_eq!(request.actions[0].name(), "hold");
+}
+
+#[tokio::test]
+async fn test_action_hold_grouped_with_other_comments() {
+    // Test that --hold groups with other comment actions
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--hold",
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    // Should have grouped-comment actions
+    assert!(!result.executable_actions.is_empty());
+    for action in &result.executable_actions {
+        assert_eq!(action.action.name(), "grouped-comment");
+    }
+}
