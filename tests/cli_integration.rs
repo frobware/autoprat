@@ -2759,7 +2759,7 @@ async fn test_filter_title_contains() {
     assert_eq!(result.filtered_prs[0].number, 125);
     assert!(result.filtered_prs[0].title.contains("dashboard"));
 
-    // Test filtering by title containing "Fix" (case-sensitive)
+    // Test filtering by title matching "Fix" (case-sensitive)
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--title", "Fix"],
         &provider,
@@ -2857,6 +2857,90 @@ async fn test_filter_title_with_other_filters() {
             .labels
             .contains(&"feature".to_string())
     );
+}
+
+#[tokio::test]
+async fn test_filter_title_regex() {
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    // Regex pattern matching titles starting with "Fix"
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--title", "^Fix"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    assert_eq!(result.filtered_prs.len(), 2);
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(pr_numbers.contains(&124)); // "Fix memory leak in worker threads"
+    assert!(pr_numbers.contains(&129)); // "Fix race condition in API handler"
+
+    // Regex with alternation: match titles containing "dashboard" or "authentication"
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--title",
+            "dashboard|authentication",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    assert_eq!(result.filtered_prs.len(), 2);
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(pr_numbers.contains(&125)); // "Add new dashboard widget"
+    assert!(pr_numbers.contains(&127)); // "Implement user authentication"
+
+    // Regex with wildcard: ".*leak" matches "Fix memory leak in worker threads"
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--title", ".*leak"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    assert_eq!(result.filtered_prs.len(), 1);
+    assert_eq!(result.filtered_prs[0].number, 124);
+
+    // Case-insensitive regex: (?i)fix matches both "Fix" and "fix"
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--title", "(?i)fix"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    assert_eq!(result.filtered_prs.len(), 3);
+    let pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    assert!(pr_numbers.contains(&124)); // "Fix memory leak in worker threads"
+    assert!(pr_numbers.contains(&129)); // "Fix race condition in API handler"
+    assert!(pr_numbers.contains(&131)); // "Minor fix with LGTM"
+}
+
+#[tokio::test]
+async fn test_filter_title_invalid_regex() {
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    // Invalid regex should match nothing (graceful failure)
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--title", "[invalid"],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+    assert_eq!(result.filtered_prs.len(), 0);
 }
 
 /// Test output selection logic - when actions are requested, should always output commands

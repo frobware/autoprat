@@ -393,8 +393,10 @@ multi_post_filter!(
     |names: &[String], pr: &PullRequest| { names.iter().all(|n| pr.has_failing_check(n)) }
 );
 
-single_post_filter!(TitlePF, title, |pr: &PullRequest, title: &str| {
-    pr.title.contains(title)
+single_post_filter!(TitlePF, title, |pr: &PullRequest, pattern: &str| {
+    regex::Regex::new(pattern)
+        .map(|re| re.is_match(&pr.title))
+        .unwrap_or(false)
 });
 
 single_post_filter!(BaseBranchPF, base, |pr: &PullRequest, branch: &str| {
@@ -466,8 +468,8 @@ struct FilterArgs {
     )]
     pub failing_check: Vec<String>,
 
-    /// Filter by PR title (case-sensitive substring match)
-    #[arg(short = 't', long, help_heading = "Filters", value_name = "TITLE")]
+    /// Filter by PR title (regex match)
+    #[arg(short = 't', long, help_heading = "Filters", value_name = "REGEX")]
     pub title: Option<String>,
 
     /// Filter by base/target branch (exact match)
