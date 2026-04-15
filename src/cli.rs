@@ -613,6 +613,11 @@ fn cli_to_actions(
         comment_actions.push(Box::new(Hold) as Box<dyn Action + Send + Sync>);
     }
 
+    // Include custom comments in the grouping
+    for comment in custom_comments {
+        comment_actions.push(Box::new(CommentAction::new(comment.clone())));
+    }
+
     // Group or use individual actions
     match comment_actions.len() {
         0 => {}
@@ -632,11 +637,6 @@ fn cli_to_actions(
     }
     if opts.merge {
         all_actions.push(Box::new(Merge) as Box<dyn Action + Send + Sync>);
-    }
-
-    // Convert custom comments to CommentAction objects
-    for comment in custom_comments {
-        all_actions.push(Box::new(CommentAction::new(comment.clone())));
     }
 
     all_actions
