@@ -1072,27 +1072,18 @@ async fn test_action_with_custom_comments() {
     let result = result.unwrap();
     // Test passes if no errors occur - custom comments are processed correctly
 
-    // Verify custom comments actually generate executable actions
-    // With 7 PRs in mock data, should have:
-    // - 7 approve actions (PRs without "approved" label: 123, 125, 126, 127, 128, 130, 131)
-    // - 18 custom comment actions (2 comments × 9 PRs)
-    // Total: 25 executable actions
-    assert_eq!(result.executable_actions.len(), 25);
+    // Verify actions are grouped: approve + 2 custom comments combined into
+    // a single grouped action per PR = 9 executable actions
+    assert_eq!(result.executable_actions.len(), 9);
 
-    // Count actions by type
-    let approve_actions = result
+    // All actions should be grouped
+    let grouped_actions = result
         .executable_actions
         .iter()
-        .filter(|action| action.action.name() == "approve")
-        .count();
-    let custom_comment_actions = result
-        .executable_actions
-        .iter()
-        .filter(|action| action.action.name() == "custom-comment")
+        .filter(|action| action.action.name() == "grouped-comment")
         .count();
 
-    assert_eq!(approve_actions, 7);
-    assert_eq!(custom_comment_actions, 18);
+    assert_eq!(grouped_actions, 9);
 }
 
 #[tokio::test]
@@ -2242,46 +2233,14 @@ async fn test_multiple_comments_only() {
     assert!(result.is_ok());
 
     let result = result.unwrap();
-    // Multiple custom comments should be processed correctly
+    // Multiple custom comments are grouped into a single action per PR
+    // = 9 PRs × 1 grouped action = 9 executable actions
+    assert_eq!(result.executable_actions.len(), 9);
 
-    // Should have 3 comments × 9 PRs = 27 executable actions
-    assert_eq!(result.executable_actions.len(), 27);
-
-    // All actions should be custom-comment actions
+    // All actions should be grouped-comment actions
     for action in &result.executable_actions {
-        assert_eq!(action.action.name(), "custom-comment");
+        assert_eq!(action.action.name(), "grouped-comment");
     }
-
-    // Verify each comment appears for each PR
-    let comment_bodies: Vec<String> = result
-        .executable_actions
-        .iter()
-        .filter_map(|action| action.action.get_comment_body())
-        .map(|s| s.to_string())
-        .collect();
-
-    assert_eq!(comment_bodies.len(), 27);
-    assert_eq!(
-        comment_bodies
-            .iter()
-            .filter(|c| *c == "First comment")
-            .count(),
-        9
-    );
-    assert_eq!(
-        comment_bodies
-            .iter()
-            .filter(|c| *c == "Second comment")
-            .count(),
-        9
-    );
-    assert_eq!(
-        comment_bodies
-            .iter()
-            .filter(|c| *c == "Third comment")
-            .count(),
-        9
-    );
 }
 
 #[tokio::test]
@@ -2310,10 +2269,9 @@ async fn test_multiple_comments_with_filters() {
     let result = result.unwrap();
     // Should filter to alice's PRs (124, 127)
     assert_eq!(result.filtered_prs.len(), 2);
-    // Custom comments should be processed correctly
 
-    // Should have 2 comments × 2 PRs = 4 executable actions
-    assert_eq!(result.executable_actions.len(), 4);
+    // 2 comments grouped into 1 action per PR = 2 executable actions
+    assert_eq!(result.executable_actions.len(), 2);
 
     // Verify comments are applied to correct PRs
     let pr_numbers: Vec<u64> = result
@@ -2322,9 +2280,9 @@ async fn test_multiple_comments_with_filters() {
         .map(|action| action.pr_info.number)
         .collect();
 
-    // Both alice's PRs should appear twice (once per comment)
-    assert_eq!(pr_numbers.iter().filter(|&&n| n == 124).count(), 2);
-    assert_eq!(pr_numbers.iter().filter(|&&n| n == 127).count(), 2);
+    // Both alice's PRs should appear once (grouped action)
+    assert_eq!(pr_numbers.iter().filter(|&&n| n == 124).count(), 1);
+    assert_eq!(pr_numbers.iter().filter(|&&n| n == 127).count(), 1);
 }
 
 #[tokio::test]
@@ -2358,24 +2316,16 @@ async fn test_multiple_comments_with_throttling() {
     assert!(result.is_ok());
 
     let result = result.unwrap();
-    // Custom comments should be processed correctly
+    // Comments are grouped: 2 comments per PR = 1 grouped action per PR.
+    // The grouped action executes if ANY sub-action should execute.
+    // PR 123 has "Needs attention" throttled, but "Please review" is not,
+    // so the grouped action still executes for all 9 PRs.
+    assert_eq!(result.executable_actions.len(), 9);
 
-    // Should have fewer actions due to throttling
-    // Expected: 8 PRs get "Please review" + 8 PRs get "Needs attention" - 1 throttled = 17 actions
-    assert_eq!(result.executable_actions.len(), 17);
-
-    // Verify PR 123 only gets "Please review" comment (not the throttled one)
-    let pr_123_actions: Vec<_> = result
-        .executable_actions
-        .iter()
-        .filter(|action| action.pr_info.number == 123)
-        .collect();
-
-    assert_eq!(pr_123_actions.len(), 1);
-    assert_eq!(
-        pr_123_actions[0].action.get_comment_body(),
-        Some("Please review")
-    );
+    // All actions should be grouped
+    for action in &result.executable_actions {
+        assert_eq!(action.action.name(), "grouped-comment");
+    }
 }
 
 #[tokio::test]
@@ -2407,28 +2357,18 @@ async fn test_mixed_actions_with_multiple_comments() {
     assert_eq!(result.filtered_prs.len(), 7);
     // Custom comments should be processed correctly
 
-    // With grouping:
-    // - All 7 PRs get a grouped action (approve+lgtm)
-    // - PR 131's grouped action will only output /approve (lgtm already exists)
-    // - 14 custom comments (2 comments × 7 PRs) = 14
-    // Total = 21 actions
-    assert_eq!(result.executable_actions.len(), 21);
+    // With grouping: approve + lgtm + 2 custom comments all combined into
+    // a single grouped action per PR = 7 executable actions
+    assert_eq!(result.executable_actions.len(), 7);
 
-    // Count actions by type
+    // All actions should be grouped
     let grouped_actions = result
         .executable_actions
         .iter()
         .filter(|action| action.action.name() == "grouped-comment")
         .count();
-    let comment_actions = result
-        .executable_actions
-        .iter()
-        .filter(|action| action.action.name() == "custom-comment")
-        .count();
 
-    // All 7 PRs get a grouped action, even though PR 131's will only contain /approve
     assert_eq!(grouped_actions, 7);
-    assert_eq!(comment_actions, 14); // 2 comments × 7 PRs
 }
 
 #[tokio::test]
@@ -2459,22 +2399,14 @@ async fn test_empty_and_whitespace_comments() {
     let result = result.unwrap();
     // Should filter to bob's PRs (125, 129)
     assert_eq!(result.filtered_prs.len(), 2);
-    // Custom comments should be processed correctly
 
-    // Should have 3 comments × 2 PRs = 6 executable actions
-    assert_eq!(result.executable_actions.len(), 6);
+    // 3 comments grouped into 1 action per PR = 2 executable actions
+    assert_eq!(result.executable_actions.len(), 2);
 
-    // Verify all comment bodies are preserved as-is
-    let comment_bodies: Vec<String> = result
-        .executable_actions
-        .iter()
-        .filter_map(|action| action.action.get_comment_body())
-        .map(|s| s.to_string())
-        .collect();
-
-    assert!(comment_bodies.contains(&"".to_string()));
-    assert!(comment_bodies.contains(&"   ".to_string()));
-    assert!(comment_bodies.contains(&"Valid comment".to_string()));
+    // All actions should be grouped
+    for action in &result.executable_actions {
+        assert_eq!(action.action.name(), "grouped-comment");
+    }
 }
 
 #[tokio::test]
@@ -2627,13 +2559,9 @@ fn test_parse_args_and_create_request_from() {
     let (request, display_mode) = result.unwrap();
     assert_eq!(request.repos.len(), 1);
     assert_eq!(request.repos[0].to_string(), "owner/repo");
-    // Both approve and custom comment are now in actions vector
-    assert_eq!(request.actions.len(), 2);
-    // First action should be approve
-    assert_eq!(request.actions[0].name(), "approve");
-    // Second action should be the custom comment
-    assert_eq!(request.actions[1].name(), "custom-comment");
-    assert_eq!(request.actions[1].get_comment_body(), Some("Test comment"));
+    // Approve and custom comment are grouped into a single action
+    assert_eq!(request.actions.len(), 1);
+    assert_eq!(request.actions[0].name(), "grouped-comment");
     assert_eq!(display_mode, DisplayMode::Normal);
 }
 
