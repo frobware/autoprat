@@ -245,6 +245,7 @@ fn display_prs_table_mode<W: Write>(
 
 const TABLE_HEADERS: &[&str] = &[
     "URL",
+    "BRANCH",
     "CI",
     "APP",
     "LGTM",
@@ -335,6 +336,7 @@ fn pr_to_table_row(pr: &PullRequest) -> Vec<String> {
 
     vec![
         pr.url.clone(),
+        pr.base_branch.clone(),
         ci_str.to_string(),
         approved.to_string(),
         lgtm.to_string(),
@@ -506,6 +508,7 @@ impl<'a> PrDetailFormatter<'a> {
         writeln!(writer, "├─Title: {} ({})", pr.title, pr.author_login)?;
         writeln!(writer, "├─PR #{}", pr.number)?;
         writeln!(writer, "├─State: OPEN")?;
+        writeln!(writer, "├─Branch: {}", pr.base_branch)?;
         writeln!(
             writer,
             "├─Created: {}",
