@@ -403,6 +403,78 @@ single_post_filter!(BaseBranchPF, base, |pr: &PullRequest, branch: &str| {
     pr.matches_base_branch(branch)
 });
 
+/// Comparison operator for numeric filter expressions.
+#[derive(Debug, Clone, Copy)]
+enum CommitOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+/// Parsed `--commits` expression such as `>1`, `<=3`, `=2`, or a bare number.
+#[derive(Debug, Clone, Copy)]
+struct CommitExpr {
+    op: CommitOp,
+    value: u64,
+}
+
+impl CommitExpr {
+    fn parse(s: &str) -> Result<Self> {
+        let s = s.trim();
+        if s.is_empty() {
+            anyhow::bail!("Empty --commits expression");
+        }
+
+        let (op, rest) = if let Some(r) = s.strip_prefix(">=") {
+            (CommitOp::Ge, r)
+        } else if let Some(r) = s.strip_prefix("<=") {
+            (CommitOp::Le, r)
+        } else if let Some(r) = s.strip_prefix("!=") {
+            (CommitOp::Ne, r)
+        } else if let Some(r) = s.strip_prefix('>') {
+            (CommitOp::Gt, r)
+        } else if let Some(r) = s.strip_prefix('<') {
+            (CommitOp::Lt, r)
+        } else if let Some(r) = s.strip_prefix('=') {
+            (CommitOp::Eq, r)
+        } else {
+            (CommitOp::Eq, s)
+        };
+
+        let value: u64 = rest
+            .trim()
+            .parse()
+            .with_context(|| format!("Invalid --commits expression '{s}'"))?;
+
+        Ok(Self { op, value })
+    }
+
+    fn matches(self, n: u64) -> bool {
+        match self.op {
+            CommitOp::Eq => n == self.value,
+            CommitOp::Ne => n != self.value,
+            CommitOp::Lt => n < self.value,
+            CommitOp::Le => n <= self.value,
+            CommitOp::Gt => n > self.value,
+            CommitOp::Ge => n >= self.value,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CommitsPF {
+    expr: CommitExpr,
+}
+
+impl PostFilter for CommitsPF {
+    fn matches(&self, pr: &PullRequest) -> bool {
+        self.expr.matches(pr.commit_count)
+    }
+}
+
 #[derive(Args, Debug, Clone, Default)]
 struct ActionArgs {
     /// Post /approve comments
@@ -475,6 +547,10 @@ struct FilterArgs {
     /// Filter by base/target branch (exact match)
     #[arg(long, help_heading = "Filters", value_name = "BRANCH")]
     pub base: Option<String>,
+
+    /// Filter by commit count: bare number (exact), or prefix with =, !=, >, >=, <, <= (e.g. '>1', '<=3')
+    #[arg(long, help_heading = "Filters", value_name = "EXPR")]
+    pub commits: Option<String>,
 }
 
 #[derive(Parser, Default, Debug)]
@@ -544,6 +620,10 @@ struct CliArgs {
     /// Truncate long lines to fit terminal width (like less -S)
     #[arg(short = 'S', long = "chop-long-lines")]
     pub chop_long_lines: bool,
+
+    /// Safety guard: abort with an error (no commands emitted) when any PR targeted by an action has more than this many commits
+    #[arg(long = "commit-limit", default_value = "1", value_name = "NUM")]
+    pub commit_limit: u64,
 }
 
 impl CliArgs {
@@ -671,7 +751,7 @@ fn cli_to_search_filters(filter_args: &FilterArgs) -> Vec<Box<dyn SearchFilter +
     out
 }
 
-fn cli_to_post_filters(filter_args: &FilterArgs) -> Vec<Box<dyn PostFilter + Send + Sync>> {
+fn cli_to_post_filters(filter_args: &FilterArgs) -> Result<Vec<Box<dyn PostFilter + Send + Sync>>> {
     let mut out: Vec<Box<dyn PostFilter + Send + Sync>> = Vec::new();
     if filter_args.failing_ci {
         out.push(Box::new(FailingCiPF));
@@ -692,7 +772,13 @@ fn cli_to_post_filters(filter_args: &FilterArgs) -> Vec<Box<dyn PostFilter + Sen
         out.push(Box::new(BaseBranchPF::new().with_value(branch.clone())));
     }
 
-    out
+    if let Some(expr) = &filter_args.commits {
+        out.push(Box::new(CommitsPF {
+            expr: CommitExpr::parse(expr)?,
+        }));
+    }
+
+    Ok(out)
 }
 
 fn format_user_query(query: &str) -> Result<String> {
@@ -857,12 +943,13 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
         query,
         limit: cli.limit,
         search_filters: cli_to_search_filters(&cli.filters),
-        post_filters: cli_to_post_filters(&cli.filters),
+        post_filters: cli_to_post_filters(&cli.filters)?,
         actions: cli_to_actions(&cli.actions, &cli.comment),
         throttle,
         history_max_age,
         history_max_comments,
         truncate_titles: cli.chop_long_lines,
+        commit_limit: cli.commit_limit,
     })
 }
 

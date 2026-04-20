@@ -4005,3 +4005,191 @@ async fn test_action_hold_grouped_with_other_comments() {
         assert_eq!(action.action.name(), "grouped-comment");
     }
 }
+
+/// Builds a PR fixture with the given commit count, otherwise identical to a
+/// minimal single-commit PR.
+fn pr_with_commits(number: u64, commit_count: u64) -> PullRequest {
+    PullRequest {
+        repo: test_repo(),
+        number,
+        title: format!("PR with {commit_count} commits"),
+        author_login: "alice".to_string(),
+        author_search_format: "alice".to_string(),
+        author_simple_name: "alice".to_string(),
+        url: format!("https://github.com/owner/repo/pull/{number}"),
+        labels: vec!["needs-ok-to-test".to_string()],
+        created_at: Utc::now(),
+        base_branch: "main".to_string(),
+        commit_count,
+        checks: vec![],
+        recent_comments: vec![],
+    }
+}
+
+#[tokio::test]
+async fn test_commit_limit_default_blocks_multi_commit_pr_with_action() {
+    let provider = MockHub::new(vec![pr_with_commits(200, 3)]);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--ok-to-test"],
+        &provider,
+    )
+    .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("exceed --commit-limit=1"), "got: {err}");
+    assert!(err.contains("3 commits"), "got: {err}");
+    assert!(
+        err.contains("https://github.com/owner/repo/pull/200"),
+        "got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_commit_limit_flag_raises_threshold() {
+    let provider = MockHub::new(vec![pr_with_commits(201, 3)]);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--ok-to-test",
+            "--commit-limit",
+            "3",
+        ],
+        &provider,
+    )
+    .await;
+
+    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+    let result = result.unwrap();
+    assert_eq!(result.executable_actions.len(), 1);
+}
+
+#[tokio::test]
+async fn test_commit_limit_not_enforced_without_actions() {
+    // Safety net only fires when we're emitting commands.
+    let provider = MockHub::new(vec![pr_with_commits(202, 5)]);
+
+    let result = run_autoprat_test(vec!["autoprat", "--repo", "owner/repo"], &provider).await;
+
+    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+    let result = result.unwrap();
+    assert_eq!(result.filtered_prs.len(), 1);
+}
+
+#[tokio::test]
+async fn test_commit_limit_only_counts_acted_upon_prs() {
+    // The single-commit PR is actionable; the over-limit PR is not (already
+    // has needs-ok-to-test satisfied) so the guard should not fire for it.
+    let mut over = pr_with_commits(203, 4);
+    over.labels = vec!["ok-to-test-already".to_string()]; // no needs-ok-to-test label
+    let ok = pr_with_commits(204, 1);
+
+    let provider = MockHub::new(vec![over, ok]);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--ok-to-test"],
+        &provider,
+    )
+    .await;
+
+    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+    let result = result.unwrap();
+    assert_eq!(result.executable_actions.len(), 1);
+    assert_eq!(result.executable_actions[0].pr_info.number, 204);
+}
+
+#[tokio::test]
+async fn test_commits_filter_exact_match() {
+    let provider = MockHub::new(vec![
+        pr_with_commits(300, 1),
+        pr_with_commits(301, 2),
+        pr_with_commits(302, 5),
+    ]);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--commits", "2"],
+        &provider,
+    )
+    .await;
+
+    let result = result.unwrap();
+    assert_eq!(result.filtered_prs.len(), 1);
+    assert_eq!(result.filtered_prs[0].number, 301);
+}
+
+#[tokio::test]
+async fn test_commits_filter_gt() {
+    let provider = MockHub::new(vec![
+        pr_with_commits(310, 1),
+        pr_with_commits(311, 2),
+        pr_with_commits(312, 5),
+    ]);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--commits", ">1"],
+        &provider,
+    )
+    .await;
+
+    let result = result.unwrap();
+    let mut nums: Vec<u64> = result.filtered_prs.iter().map(|p| p.number).collect();
+    nums.sort();
+    assert_eq!(nums, vec![311, 312]);
+}
+
+#[tokio::test]
+async fn test_commits_filter_le() {
+    let provider = MockHub::new(vec![
+        pr_with_commits(320, 1),
+        pr_with_commits(321, 3),
+        pr_with_commits(322, 5),
+    ]);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--commits", "<=3"],
+        &provider,
+    )
+    .await;
+
+    let result = result.unwrap();
+    let mut nums: Vec<u64> = result.filtered_prs.iter().map(|p| p.number).collect();
+    nums.sort();
+    assert_eq!(nums, vec![320, 321]);
+}
+
+#[tokio::test]
+async fn test_commits_filter_ne() {
+    let provider = MockHub::new(vec![
+        pr_with_commits(330, 1),
+        pr_with_commits(331, 2),
+        pr_with_commits(332, 1),
+    ]);
+
+    let result = run_autoprat_test(
+        vec!["autoprat", "--repo", "owner/repo", "--commits", "!=1"],
+        &provider,
+    )
+    .await;
+
+    let result = result.unwrap();
+    assert_eq!(result.filtered_prs.len(), 1);
+    assert_eq!(result.filtered_prs[0].number, 331);
+}
+
+#[test]
+fn test_commits_filter_invalid_expression() {
+    let result = parse_args_and_create_request_from(vec![
+        "autoprat",
+        "--repo",
+        "owner/repo",
+        "--commits",
+        "not-a-number",
+    ]);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("--commits"), "got: {err}");
+}

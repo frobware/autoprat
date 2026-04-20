@@ -18,10 +18,40 @@ where
 
     let executable_actions = generate_executable_actions(&filtered_prs, request);
 
+    enforce_commit_limit(&executable_actions, request.commit_limit)?;
+
     Ok(QueryResult {
         filtered_prs,
         executable_actions,
     })
+}
+
+fn enforce_commit_limit(tasks: &[Task], limit: u64) -> anyhow::Result<()> {
+    use std::collections::BTreeMap;
+
+    let mut offenders: BTreeMap<&str, u64> = BTreeMap::new();
+    for task in tasks {
+        if task.pr_info.commit_count > limit {
+            offenders.insert(&task.pr_info.url, task.pr_info.commit_count);
+        }
+    }
+
+    if offenders.is_empty() {
+        return Ok(());
+    }
+
+    let mut msg = format!(
+        "{} pull request(s) exceed --commit-limit={} (no commands emitted):",
+        offenders.len(),
+        limit
+    );
+    for (url, count) in &offenders {
+        msg.push_str(&format!("\n  {url} ({count} commits)"));
+    }
+    msg.push_str(
+        "\nRe-run with --commit-limit <N> to raise the threshold, or --exclude the PR(s).",
+    );
+    anyhow::bail!(msg)
 }
 
 fn generate_executable_actions(filtered_prs: &[PullRequest], request: &QuerySpec) -> Vec<Task> {

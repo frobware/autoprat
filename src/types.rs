@@ -628,6 +628,7 @@ pub struct QuerySpec {
     pub history_max_age: Duration,
     pub history_max_comments: usize,
     pub truncate_titles: bool,
+    pub commit_limit: u64,
 }
 
 impl QuerySpec {

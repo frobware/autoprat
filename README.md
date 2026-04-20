@@ -133,6 +133,12 @@ autoprat -r myorg/myrepo --base main --needs-approve
 # PRs targeting a release branch.
 autoprat -r myorg/myrepo --base release-1.0 --approve | sh
 
+# PRs with more than one commit (often bot-generated rebase chains).
+autoprat -r myorg/myrepo --commits ">1"
+
+# PRs with exactly 1 commit, ready for bulk LGTM.
+autoprat -r myorg/myrepo --commits 1 --author trusted-bot --lgtm
+
 # Raw GitHub search queries for complex filtering.
 # Note: 'is:pr' and 'is:open' are automatically added if not present
 autoprat --query "repo:myorg/myrepo author:dependabot created:>2024-01-01"
@@ -209,6 +215,25 @@ autoprat -r myorg/myrepo --approve | sh
 
 The conditional actions (`--approve`, `--lgtm`, `--ok-to-test`, `--hold`) check existing labels and only generate commands when appropriate, whilst `--close`, `--merge`, and `--retest` always execute when specified. Perfect for automation - no duplicate comments, no spam.
 
+### Commit Limit Guard
+Automated bots like Konflux or MintMaker often produce PRs with hundreds of commits (rebase chains, dependency upgrade trains). You almost never want to blindly `/lgtm` or `/approve` those. When an action is requested, autoprat refuses to emit any commands if any targeted PR has more than `--commit-limit` commits (default: `1`):
+
+```bash
+$ autoprat -r myorg/myrepo --author red-hat-konflux /lgtm
+Error: 3 pull request(s) exceed --commit-limit=1 (no commands emitted):
+  https://github.com/myorg/myrepo/pull/1762 (529 commits)
+  https://github.com/myorg/myrepo/pull/1763 (534 commits)
+  https://github.com/myorg/myrepo/pull/1764 (534 commits)
+Re-run with --commit-limit <N> to raise the threshold, or --exclude the PR(s).
+```
+
+Raise the threshold when you want to proceed, or use `--exclude` to skip individual PRs:
+```bash
+autoprat -r myorg/myrepo --author trusted-bot --lgtm --commit-limit 50 | sh
+```
+
+The guard only fires when an action is present. Listing and filtering are never blocked. Pair it with `--commits ">1"` to discover over-limit PRs before acting.
+
 ### Comment Throttling
 Prevent spam when running in loops:
 ```bash
@@ -284,6 +309,7 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `--needs-ok-to-test` - Has 'needs-ok-to-test' label
 - `--base <BRANCH>` - Filter by base/target branch (exact match)
 - `--title <PATTERN>` - Filter by PR title (regex, e.g. `"(?i)fix"`, `"dashboard|auth"`; plain substrings work too)
+- `--commits <EXPR>` - Filter by commit count; bare number for exact match or prefix with a comparison operator (`=N`, `!=N`, `>N`, `>=N`, `<N`, `<=N`, e.g. `">1"`, `"<=3"`)
 - `--query <QUERY>` - Raw GitHub search query (automatically adds `is:pr` and `is:open` if not present, mutually exclusive with all other filters and repository specification)
 
 ### Actions
@@ -298,6 +324,9 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `--throttle <THROTTLE>` - Skip if same comment posted recently (e.g. `5m`, `1h`)
 
 All actions also accept Prow-style slash syntax (`/hold`, `/approve`, etc.) — see note above.
+
+### Safety
+- `--commit-limit <NUM>` - Abort with an error (no commands emitted) when any PR targeted by an action has more than this many commits [default: 1]. See [Commit Limit Guard](#commit-limit-guard).
 
 ### Output
 - `-d, --detailed` - Show detailed PR information
