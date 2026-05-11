@@ -1,15 +1,25 @@
 .PHONY: fmt-check fmt-fix build test clean clippy coverage coverage-html coverage-open coverage-ci install-coverage-tools
 
+# Inside the nix devshell, nightly rustfmt is already first on PATH
+# and there is no rustup wrapper to handle `+nightly`. Drop the
+# toolchain selector so `cargo fmt` picks up whichever rustfmt is on
+# PATH; outside nix we keep the rustup-style invocation.
+ifdef IN_NIX_SHELL
+CARGO_FMT := cargo fmt
+else
+CARGO_FMT := cargo +nightly fmt
+endif
+
 # Development
 build: fmt-fix test
 	cargo build
 
 # Formatting
 fmt-check:
-	cargo +nightly fmt --all -- --check
+	$(CARGO_FMT) --all -- --check
 
 fmt-fix:
-	cargo +nightly fmt --all
+	$(CARGO_FMT) --all
 
 test:
 	cargo test
