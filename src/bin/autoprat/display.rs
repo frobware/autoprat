@@ -7,7 +7,7 @@ use autoprat::{
 };
 #[cfg(test)]
 use autoprat::{CheckUrl, Repo};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 
 const LABEL_APPROVED: &str = "approved";
 const LABEL_LGTM: &str = "lgtm";
@@ -218,19 +218,67 @@ fn display_prs_by_mode<W: Write>(
     mode: &DisplayMode,
     error_logs: Option<&HashMap<u64, HashMap<CheckName, Vec<String>>>>,
     truncate_titles: bool,
+    use_tty: bool,
     writer: &mut W,
 ) -> Result<()> {
     match mode {
         DisplayMode::Quiet => display_prs_quiet(prs, writer),
         DisplayMode::Detailed => display_prs_verbose(prs, false, error_logs, writer),
         DisplayMode::DetailedWithLogs => display_prs_verbose(prs, true, error_logs, writer),
-        DisplayMode::Normal => display_prs_table_mode(prs, truncate_titles, writer),
+        DisplayMode::Normal => {
+            if use_tty {
+                display_prs_table_mode(prs, truncate_titles, writer)
+            } else {
+                display_prs_tsv(prs, writer)
+            }
+        }
     }
 }
 
 fn display_prs_quiet<W: Write>(prs: &[PullRequest], writer: &mut W) -> Result<()> {
     for pr_info in prs {
         writeln!(writer, "{}", pr_info.number)?;
+    }
+    Ok(())
+}
+
+/// Render the normal-mode columns as tab-separated values for
+/// machine consumption: no header, no separator, no truncation,
+/// boolean labels as 0/1, and timestamps in RFC3339 instead of the
+/// humanised "2 hours ago" form. Column order matches the
+/// human-facing table.
+fn display_prs_tsv<W: Write>(prs: &[PullRequest], writer: &mut W) -> Result<()> {
+    for pr in prs {
+        let ci_str = format_ci_status(&get_ci_status(&pr.checks));
+        let approved = if pr.has_label(LABEL_APPROVED) {
+            "1"
+        } else {
+            "0"
+        };
+        let lgtm = if pr.has_label(LABEL_LGTM) { "1" } else { "0" };
+        let ok2test = if pr.has_label(LABEL_OK_TO_TEST) {
+            "1"
+        } else {
+            "0"
+        };
+        let hold = if pr.has_label(LABEL_HOLD) { "1" } else { "0" };
+        let created = pr.created_at.to_rfc3339_opts(SecondsFormat::Secs, true);
+
+        writeln!(
+            writer,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            pr.url,
+            pr.base_branch,
+            ci_str,
+            approved,
+            lgtm,
+            ok2test,
+            hold,
+            pr.commit_count,
+            pr.author_simple_name,
+            created,
+            pr.title,
+        )?;
     }
     Ok(())
 }
@@ -776,6 +824,7 @@ pub async fn display_pr_table<W: Write + Send>(
     prs: &[PullRequest],
     mode: &DisplayMode,
     truncate_titles: bool,
+    use_tty: bool,
     writer: &mut W,
 ) -> Result<()> {
     use crate::log_fetcher::LogFetcher;
@@ -814,7 +863,14 @@ pub async fn display_pr_table<W: Write + Send>(
         None
     };
 
-    display_prs_by_mode(prs, mode, error_logs.as_ref(), truncate_titles, writer)
+    display_prs_by_mode(
+        prs,
+        mode,
+        error_logs.as_ref(),
+        truncate_titles,
+        use_tty,
+        writer,
+    )
 }
 
 #[cfg(test)]
@@ -877,7 +933,7 @@ mod tests {
         let mode = create_display_mode(true, false, false);
         let mut output = Vec::new();
 
-        display_pr_table(&prs, &mode, false, &mut output)
+        display_pr_table(&prs, &mode, false, true, &mut output)
             .await
             .unwrap();
 
@@ -920,7 +976,7 @@ mod tests {
         let mode = create_display_mode(false, true, false);
         let mut output = Vec::new();
 
-        display_pr_table(&prs, &mode, false, &mut output)
+        display_pr_table(&prs, &mode, false, true, &mut output)
             .await
             .unwrap();
 
@@ -951,7 +1007,7 @@ mod tests {
         let mode = create_display_mode(false, false, true);
         let mut output = Vec::new();
 
-        display_pr_table(&prs, &mode, false, &mut output)
+        display_pr_table(&prs, &mode, false, true, &mut output)
             .await
             .unwrap();
 
@@ -965,12 +1021,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_display_tsv_mode_non_tty() {
+        let prs = create_test_pr_data();
+        let mode = create_display_mode(false, false, false);
+        let mut output = Vec::new();
+
+        display_pr_table(&prs, &mode, false, false, &mut output)
+            .await
+            .unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+
+        // No header row, no separator, exactly one record per PR.
+        assert!(!result.contains("URL"));
+        assert!(!result.contains("CREATED AT"));
+        assert!(!result.contains("---"));
+        assert_eq!(result.lines().count(), 1);
+
+        let line = result.lines().next().unwrap();
+        let fields: Vec<&str> = line.split('\t').collect();
+
+        // URL, BRANCH, CI, APP, LGTM, OK2TST, HOLD, COMMITS, AUTHOR, CREATED, TITLE.
+        assert_eq!(fields.len(), 11);
+        assert_eq!(fields[0], "https://github.com/owner/repo/pull/101");
+        assert_eq!(fields[1], "main");
+        assert_eq!(fields[3], "1"); // approved.
+        assert_eq!(fields[4], "0"); // lgtm.
+        assert_eq!(fields[5], "0"); // ok-to-test.
+        assert_eq!(fields[6], "0"); // hold.
+        assert_eq!(fields[7], "1"); // commits.
+        assert_eq!(fields[8], "alice");
+        // Created at should be RFC3339 with seconds precision and a Z suffix.
+        assert!(
+            fields[9].ends_with('Z'),
+            "expected RFC3339 timestamp, got {}",
+            fields[9]
+        );
+        assert!(fields[9].contains('T'));
+        assert_eq!(fields[10], "Add authentication system");
+    }
+
+    #[tokio::test]
+    async fn test_display_tsv_mode_empty() {
+        let prs: Vec<PullRequest> = vec![];
+        let mode = create_display_mode(false, false, false);
+        let mut output = Vec::new();
+
+        display_pr_table(&prs, &mode, false, false, &mut output)
+            .await
+            .unwrap();
+
+        let result = String::from_utf8(output).unwrap();
+        assert!(
+            result.is_empty(),
+            "non-tty empty PR list should be empty output, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_empty_pr_list() {
         let prs = vec![];
         let mode = create_display_mode(false, false, false);
         let mut output = Vec::new();
 
-        display_pr_table(&prs, &mode, false, &mut output)
+        display_pr_table(&prs, &mode, false, true, &mut output)
             .await
             .unwrap();
 
