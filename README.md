@@ -337,6 +337,8 @@ All actions also accept Prow-style slash syntax (`/hold`, `/approve`, etc.) — 
 
 **When to use `-S`:** By default, autoprat outputs full lines which may wrap on narrow terminals. The `-S` flag chops lines at the terminal width. Width is determined in priority order: `COLUMNS` environment variable (if set), terminal size detection, or `/dev/tty` query (for redirected output like `watch`). Override the detected width with `COLUMNS=120 autoprat -S`.
 
+**Piped output:** When stdout is not a terminal (you piped autoprat into another command, redirected to a file, or captured in `$(...)`), the default table is replaced with a tab-separated form: no header row, no separator line, boolean columns rendered as `1`/`0` instead of checkmarks, and `CREATED AT` rendered as an RFC3339 timestamp instead of the humanised "2 hours ago". The column order matches the table. Scripts can split on tab and parse the timestamp directly. To force the human-readable table even when piping (for example into `less -R`), set `AUTOPRAT_FORCE_TTY=1`. The `-q/--quiet`, `-d/--detailed`, and `-D/--detailed-with-logs` modes are unaffected -- they already produce a stable shape.
+
 ### Debugging
 Use the `RUST_LOG` environment variable for granular tracing:
 ```bash

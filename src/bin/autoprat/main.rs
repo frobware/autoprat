@@ -1,8 +1,30 @@
 mod display;
 mod log_fetcher;
 
+use std::io::IsTerminal;
+
 use autoprat::{GitHub, fetch_pull_requests, parse_args};
 use display::{display_pr_table, output_shell_commands};
+
+/// Decide whether to format output for a human-readable terminal.
+///
+/// Returns true when stdout is a tty, or when the AUTOPRAT_FORCE_TTY
+/// environment variable is set to a truthy value (1, true, yes;
+/// case-insensitive). This mirrors gh's GH_FORCE_TTY behaviour: a way
+/// to keep the rich table output when piping into a pager or capturing
+/// into a file.
+fn should_use_tty_output() -> bool {
+    if let Ok(val) = std::env::var("AUTOPRAT_FORCE_TTY") {
+        let v = val.trim().to_ascii_lowercase();
+        if matches!(v.as_str(), "1" | "true" | "yes") {
+            return true;
+        }
+        if matches!(v.as_str(), "0" | "false" | "no" | "") {
+            return false;
+        }
+    }
+    std::io::stdout().is_terminal()
+}
 
 fn handle_clap_help_version(clap_err: &clap::Error) -> ! {
     use clap::error::ErrorKind;
@@ -54,6 +76,7 @@ async fn main() -> anyhow::Result<()> {
             &result.filtered_prs,
             &display_mode,
             request.truncate_titles,
+            should_use_tty_output(),
             &mut stdout,
         )
         .await?;
