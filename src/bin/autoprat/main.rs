@@ -52,7 +52,14 @@ fn init_tracing() {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() {
+    if let Err(err) = run().await {
+        eprintln!("Error: {err:#}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> anyhow::Result<()> {
     init_tracing();
 
     let (request, display_mode) = match parse_args(std::env::args()) {
