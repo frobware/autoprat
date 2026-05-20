@@ -876,9 +876,11 @@ fn parse_pr_args_to_identifiers(repos: &[String], prs: &[String]) -> Result<Vec<
             let repo_id = Repo::parse(&repos[0])
                 .map_err(|e| anyhow::anyhow!("Invalid repository format '{}': {}", repos[0], e))?;
 
-            let pr_number: u64 = pr
-                .parse()
-                .with_context(|| format!("Invalid PR number: '{pr}'"))?;
+            let pr_number: u64 = pr.parse().map_err(|_| {
+                anyhow::anyhow!(
+                    "Invalid PR identifier '{pr}': expected a PR number (e.g. 123) or URL (e.g. https://github.com/owner/repo/pull/123)"
+                )
+            })?;
 
             identifiers.push((repo_id, pr_number));
         }
@@ -992,4 +994,62 @@ where
 
     let cli = CliArgs::try_parse_from(transformed_args)?;
     build_query_from_cli(cli)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_pr_args_to_identifiers_rejects_bare_dash_with_helpful_message() {
+        let err = parse_pr_args_to_identifiers(
+            &["openshift/bpfman-operator".to_string()],
+            &["-".to_string()],
+        )
+        .expect_err("expected bare '-' to be rejected");
+        let rendered = format!("{err:#}");
+
+        assert!(
+            rendered.contains('-'),
+            "error should quote the offending identifier, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("PR number") || rendered.contains("URL"),
+            "error should describe expected format, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("invalid digit"),
+            "error should not leak std parser detail, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn parse_pr_args_to_identifiers_rejects_non_numeric_with_helpful_message() {
+        let err = parse_pr_args_to_identifiers(
+            &["openshift/bpfman-operator".to_string()],
+            &["red-hat-konflux".to_string()],
+        )
+        .expect_err("expected non-numeric identifier to be rejected");
+        let rendered = format!("{err:#}");
+
+        assert!(
+            !rendered.contains("invalid digit"),
+            "error should not leak std parser detail, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("PR number") || rendered.contains("URL"),
+            "error should describe expected format, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn parse_pr_args_to_identifiers_accepts_numeric_pr() {
+        let identifiers = parse_pr_args_to_identifiers(
+            &["openshift/bpfman-operator".to_string()],
+            &["123".to_string()],
+        )
+        .expect("numeric PR should parse");
+        assert_eq!(identifiers.len(), 1);
+        assert_eq!(identifiers[0].1, 123);
+    }
 }
