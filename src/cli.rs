@@ -3,477 +3,21 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use clap::{Args, Parser};
 
-use crate::types::{Action, DisplayMode, PostFilter, PullRequest, QuerySpec, Repo, SearchFilter};
+use crate::{
+    filters::{
+        AuthorPost, BaseBranchPost, BaseBranchSearch, CommitExpr, CommitsPost, FailingCheckPost,
+        FailingCiPost, LabelSearch, NeedsApproveSearch, NeedsLgtmSearch, NeedsOkToTestSearch,
+        TitlePost,
+    },
+    pr_selector::{PrIdentifier, parse_pr_identifiers},
+    search::format_user_query,
+    types::{
+        ActionPolicy, AppRequest, CommentAction, DisplayMode, DisplaySettings, FetchCriteria,
+        PostFilter, PrAction, QuerySpec, Repo, SearchFilter, SelectionPolicy,
+    },
+};
 
 const BUILD_INFO_HUMAN: &str = env!("BUILD_INFO_HUMAN");
-
-macro_rules! define_action {
-    ($vis:vis $ty:ident, $name:expr, $only_if:expr, $comment:expr) => {
-        #[derive(Debug, Clone)]
-        $vis struct $ty;
-
-        impl Action for $ty {
-            fn name(&self) -> &'static str {
-                $name
-            }
-
-            fn only_if(&self, pr_info: &PullRequest) -> bool {
-                $only_if(pr_info)
-            }
-
-            fn get_comment_body(&self) -> Option<&'static str> {
-                $comment
-            }
-
-            fn clone_box(&self) -> Box<dyn Action + Send + Sync> {
-                Box::new(self.clone())
-            }
-        }
-    };
-}
-
-macro_rules! simple_search_filter {
-    ($vis:vis $ty:ident, $apply:expr, $matches:expr) => {
-        #[derive(Debug)]
-        $vis struct $ty;
-
-        impl SearchFilter for $ty {
-            fn apply(&self, terms: &mut Vec<String>) {
-                ($apply)(terms)
-            }
-
-            fn matches(&self, pr: &PullRequest) -> bool {
-                ($matches)(pr)
-            }
-        }
-    };
-}
-
-macro_rules! multi_search_filter {
-    ($vis:vis $ty:ident, $field:ident, $apply:expr, $matches:expr) => {
-        #[derive(Debug, Clone)]
-        $vis struct $ty {
-            pub $field: Vec<String>,
-        }
-        impl SearchFilter for $ty {
-            fn apply(&self, terms: &mut Vec<String>) {
-                ($apply)(&self.$field, terms)
-            }
-            fn matches(&self, pr: &PullRequest) -> bool {
-                ($matches)(&self.$field, pr)
-            }
-        }
-    };
-}
-
-macro_rules! simple_post_filter {
-    ($vis:vis $ty:ident, $pred:expr) => {
-        #[derive(Debug)]
-        $vis struct $ty;
-        impl PostFilter for $ty {
-            fn matches(&self, pr: &PullRequest) -> bool {
-                ($pred)(pr)
-            }
-        }
-    };
-}
-
-macro_rules! single_post_filter {
-    ($vis:vis $ty:ident, $field:ident, $pred:expr) => {
-        #[derive(Debug, Clone)]
-        $vis struct $ty {
-            $field: Option<String>,
-        }
-
-        impl $ty {
-            pub const fn new() -> Self {
-                Self { $field: None }
-            }
-            pub fn with_value(mut self, v: impl Into<String>) -> Self {
-                self.$field = Some(v.into());
-                self
-            }
-        }
-
-        impl PostFilter for $ty {
-            fn matches(&self, pr: &PullRequest) -> bool {
-                match &self.$field {
-                    Some(val) => ($pred)(pr, val),
-                    None => true,
-                }
-            }
-        }
-    };
-}
-
-macro_rules! multi_post_filter {
-    ($vis:vis $ty:ident, $field:ident, $pred:expr) => {
-        #[derive(Debug, Clone)]
-        $vis struct $ty {
-            pub $field: Vec<String>,
-        }
-
-
-        impl PostFilter for $ty {
-            fn matches(&self, pr: &PullRequest) -> bool {
-                if self.$field.is_empty() {
-                    return true;
-                }
-                ($pred)(&self.$field, pr)
-            }
-        }
-    };
-}
-
-define_action!(
-    Approve,
-    "approve",
-    |pr: &PullRequest| !pr.has_label("approved"),
-    Some("/approve")
-);
-
-define_action!(
-    Lgtm,
-    "lgtm",
-    |pr: &PullRequest| !pr.has_label("lgtm"),
-    Some("/lgtm")
-);
-
-define_action!(
-    OkToTest,
-    "ok-to-test",
-    |pr: &PullRequest| pr.has_label("needs-ok-to-test"),
-    Some("/ok-to-test")
-);
-
-define_action!(Retest, "retest", |_| true, Some("/retest"));
-
-define_action!(
-    Hold,
-    "hold",
-    |pr: &PullRequest| !pr.has_label("do-not-merge/hold"),
-    Some("/hold")
-);
-
-#[derive(Debug, Clone)]
-struct Close;
-
-impl Action for Close {
-    fn name(&self) -> &'static str {
-        "close"
-    }
-
-    fn only_if(&self, _pr_info: &PullRequest) -> bool {
-        true
-    }
-
-    fn get_comment_body(&self) -> Option<&str> {
-        None
-    }
-
-    fn clone_box(&self) -> Box<dyn Action + Send + Sync> {
-        Box::new(self.clone())
-    }
-
-    fn format_shell_command(&self, pr_info: &PullRequest) -> String {
-        format!("gh pr close {}", pr_info.url)
-    }
-
-    fn should_execute(
-        &self,
-        pr: &PullRequest,
-        _history_max_comments: usize,
-        _history_max_age: Duration,
-        _throttle: Option<Duration>,
-    ) -> bool {
-        // Close is not idempotent/throttled - always execute if only_if returns true
-        self.only_if(pr)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Merge;
-
-impl Action for Merge {
-    fn name(&self) -> &'static str {
-        "merge"
-    }
-
-    fn only_if(&self, _pr_info: &PullRequest) -> bool {
-        true
-    }
-
-    fn get_comment_body(&self) -> Option<&str> {
-        None
-    }
-
-    fn clone_box(&self) -> Box<dyn Action + Send + Sync> {
-        Box::new(self.clone())
-    }
-
-    fn format_shell_command(&self, pr_info: &PullRequest) -> String {
-        format!("gh pr merge --merge {}", pr_info.url)
-    }
-
-    fn should_execute(
-        &self,
-        pr: &PullRequest,
-        _history_max_comments: usize,
-        _history_max_age: Duration,
-        _throttle: Option<Duration>,
-    ) -> bool {
-        // Merge is not idempotent/throttled - always execute if only_if returns true
-        self.only_if(pr)
-    }
-}
-
-/// Action that posts a custom comment on a pull request.
-///
-/// Allows arbitrary comment text to be posted, with optional throttling
-/// to prevent duplicate comments within a specified time window.
-#[derive(Debug, Clone)]
-pub struct CommentAction {
-    pub comment: String,
-}
-
-impl CommentAction {
-    pub fn new(comment: impl Into<String>) -> Self {
-        Self {
-            comment: comment.into(),
-        }
-    }
-}
-
-impl Action for CommentAction {
-    fn name(&self) -> &'static str {
-        "custom-comment"
-    }
-    fn only_if(&self, _pr_info: &PullRequest) -> bool {
-        true
-    }
-    fn get_comment_body(&self) -> Option<&str> {
-        Some(&self.comment)
-    }
-    fn clone_box(&self) -> Box<dyn Action + Send + Sync> {
-        Box::new(self.clone())
-    }
-}
-
-/// Action that groups multiple comment commands into a single comment.
-///
-/// When multiple comment flags are specified (--approve, --lgtm, --ok-to-test, --retest),
-/// this action combines them into a single GitHub comment with newline-separated commands.
-#[derive(Debug, Clone)]
-pub struct GroupedCommentAction {
-    pub actions: Vec<Box<dyn Action + Send + Sync>>,
-}
-
-impl GroupedCommentAction {
-    pub fn new(actions: Vec<Box<dyn Action + Send + Sync>>) -> Self {
-        Self { actions }
-    }
-}
-
-impl Action for GroupedCommentAction {
-    fn name(&self) -> &'static str {
-        "grouped-comment"
-    }
-
-    fn only_if(&self, pr_info: &PullRequest) -> bool {
-        // Execute if ANY of the grouped actions should execute
-        self.actions.iter().any(|action| action.only_if(pr_info))
-    }
-
-    fn get_comment_body(&self) -> Option<&str> {
-        // No single body - we have multiple commands
-        None
-    }
-
-    fn clone_box(&self) -> Box<dyn Action + Send + Sync> {
-        Box::new(self.clone())
-    }
-
-    fn format_shell_command(&self, pr_info: &PullRequest) -> String {
-        // Get valid commands and join them
-        let valid_commands: Vec<String> = self
-            .actions
-            .iter()
-            .filter(|action| action.only_if(pr_info))
-            .filter_map(|action| action.get_comment_body())
-            .map(String::from)
-            .collect();
-
-        let combined_body = valid_commands.join("\\n");
-        // Use $'...' syntax to interpret escape sequences like \n as actual newlines
-        format!("gh pr comment {} --body $'{}'", pr_info.url, combined_body)
-    }
-
-    fn should_execute(
-        &self,
-        pr: &PullRequest,
-        history_max_comments: usize,
-        history_max_age: Duration,
-        throttle: Option<Duration>,
-    ) -> bool {
-        // Execute if ANY of the grouped actions should execute
-        self.actions.iter().any(|action| {
-            action.should_execute(pr, history_max_comments, history_max_age, throttle)
-        })
-    }
-}
-
-simple_search_filter!(
-    NeedsApproveSF,
-    |terms: &mut Vec<String>| terms.push("-label:approved".into()),
-    |pr: &PullRequest| !pr.has_label("approved")
-);
-
-simple_search_filter!(
-    NeedsLgtmSF,
-    |terms: &mut Vec<String>| terms.push("-label:lgtm".into()),
-    |pr: &PullRequest| !pr.has_label("lgtm")
-);
-
-simple_search_filter!(
-    NeedsOkToTestSF,
-    |terms: &mut Vec<String>| terms.push("label:needs-ok-to-test".into()),
-    |pr: &PullRequest| pr.has_label("needs-ok-to-test")
-);
-
-multi_search_filter!(
-    LabelSF,
-    labels,
-    |names: &[String], terms: &mut Vec<String>| {
-        for lbl in names {
-            if let Some(neg) = lbl.strip_prefix('-') {
-                terms.push(format!("-label:{neg}"));
-            } else {
-                terms.push(format!("label:{lbl}"));
-            }
-        }
-    },
-    |names: &[String], pr: &PullRequest| {
-        for lbl in names {
-            if let Some(neg) = lbl.strip_prefix('-') {
-                if pr.has_label(neg) {
-                    return false;
-                }
-            } else if !pr.has_label(lbl) {
-                return false;
-            }
-        }
-        true
-    }
-);
-
-#[derive(Debug)]
-struct BaseBranchSF {
-    branch: String,
-}
-
-impl SearchFilter for BaseBranchSF {
-    fn apply(&self, terms: &mut Vec<String>) {
-        terms.push(format!("base:{}", self.branch));
-    }
-
-    fn matches(&self, pr: &PullRequest) -> bool {
-        pr.matches_base_branch(&self.branch)
-    }
-}
-
-simple_post_filter!(FailingCiPF, |pr: &PullRequest| { pr.has_failing_ci() });
-
-single_post_filter!(AuthorPF, author, |pr: &PullRequest, name: &str| {
-    pr.matches_author(name)
-});
-
-multi_post_filter!(
-    FailingCheckPF,
-    check_names,
-    |names: &[String], pr: &PullRequest| { names.iter().all(|n| pr.has_failing_check(n)) }
-);
-
-single_post_filter!(TitlePF, title, |pr: &PullRequest, pattern: &str| {
-    regex::Regex::new(pattern)
-        .map(|re| re.is_match(&pr.title))
-        .unwrap_or(false)
-});
-
-single_post_filter!(BaseBranchPF, base, |pr: &PullRequest, branch: &str| {
-    pr.matches_base_branch(branch)
-});
-
-/// Comparison operator for numeric filter expressions.
-#[derive(Debug, Clone, Copy)]
-enum CommitOp {
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
-
-/// Parsed `--commits` expression such as `>1`, `<=3`, `=2`, or a bare number.
-#[derive(Debug, Clone, Copy)]
-struct CommitExpr {
-    op: CommitOp,
-    value: u64,
-}
-
-impl CommitExpr {
-    fn parse(s: &str) -> Result<Self> {
-        let s = s.trim();
-        if s.is_empty() {
-            anyhow::bail!("Empty --commits expression");
-        }
-
-        let (op, rest) = if let Some(r) = s.strip_prefix(">=") {
-            (CommitOp::Ge, r)
-        } else if let Some(r) = s.strip_prefix("<=") {
-            (CommitOp::Le, r)
-        } else if let Some(r) = s.strip_prefix("!=") {
-            (CommitOp::Ne, r)
-        } else if let Some(r) = s.strip_prefix('>') {
-            (CommitOp::Gt, r)
-        } else if let Some(r) = s.strip_prefix('<') {
-            (CommitOp::Lt, r)
-        } else if let Some(r) = s.strip_prefix('=') {
-            (CommitOp::Eq, r)
-        } else {
-            (CommitOp::Eq, s)
-        };
-
-        let value: u64 = rest
-            .trim()
-            .parse()
-            .with_context(|| format!("Invalid --commits expression '{s}'"))?;
-
-        Ok(Self { op, value })
-    }
-
-    fn matches(self, n: u64) -> bool {
-        match self.op {
-            CommitOp::Eq => n == self.value,
-            CommitOp::Ne => n != self.value,
-            CommitOp::Lt => n < self.value,
-            CommitOp::Le => n <= self.value,
-            CommitOp::Gt => n > self.value,
-            CommitOp::Ge => n >= self.value,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct CommitsPF {
-    expr: CommitExpr,
-}
-
-impl PostFilter for CommitsPF {
-    fn matches(&self, pr: &PullRequest) -> bool {
-        self.expr.matches(pr.commit_count)
-    }
-}
 
 #[derive(Args, Debug, Clone, Default)]
 struct ActionArgs {
@@ -671,54 +215,39 @@ impl CliArgs {
     }
 }
 
-fn cli_to_actions(
-    opts: &ActionArgs,
-    custom_comments: &[String],
-) -> Vec<Box<dyn Action + Send + Sync>> {
-    let mut comment_actions: Vec<Box<dyn Action + Send + Sync>> = Vec::new();
+fn cli_to_actions(opts: &ActionArgs, custom_comments: &[String]) -> Vec<PrAction> {
+    let mut comment_actions = Vec::new();
     let mut all_actions = Vec::new();
 
-    // Collect comment actions
     if opts.approve {
-        comment_actions.push(Box::new(Approve) as Box<dyn Action + Send + Sync>);
+        comment_actions.push(CommentAction::Approve);
     }
     if opts.lgtm {
-        comment_actions.push(Box::new(Lgtm) as Box<dyn Action + Send + Sync>);
+        comment_actions.push(CommentAction::Lgtm);
     }
     if opts.ok_to_test {
-        comment_actions.push(Box::new(OkToTest) as Box<dyn Action + Send + Sync>);
+        comment_actions.push(CommentAction::OkToTest);
     }
     if opts.retest {
-        comment_actions.push(Box::new(Retest) as Box<dyn Action + Send + Sync>);
+        comment_actions.push(CommentAction::Retest);
     }
     if opts.hold {
-        comment_actions.push(Box::new(Hold) as Box<dyn Action + Send + Sync>);
+        comment_actions.push(CommentAction::Hold);
     }
 
-    // Include custom comments in the grouping
     for comment in custom_comments {
-        comment_actions.push(Box::new(CommentAction::new(comment.clone())));
+        comment_actions.push(CommentAction::Custom(comment.clone()));
     }
 
-    // Group or use individual actions
-    match comment_actions.len() {
-        0 => {}
-        1 => {
-            all_actions.push(comment_actions.into_iter().next().unwrap());
-        }
-        _ => {
-            // Multiple comment actions - group them!
-            all_actions.push(Box::new(GroupedCommentAction::new(comment_actions))
-                as Box<dyn Action + Send + Sync>);
-        }
+    if let Some(action) = PrAction::comments(comment_actions) {
+        all_actions.push(action);
     }
 
-    // Handle non-comment actions
     if opts.close {
-        all_actions.push(Box::new(Close) as Box<dyn Action + Send + Sync>);
+        all_actions.push(PrAction::Close);
     }
     if opts.merge {
-        all_actions.push(Box::new(Merge) as Box<dyn Action + Send + Sync>);
+        all_actions.push(PrAction::Merge);
     }
 
     all_actions
@@ -727,23 +256,23 @@ fn cli_to_actions(
 fn cli_to_search_filters(filter_args: &FilterArgs) -> Vec<Box<dyn SearchFilter + Send + Sync>> {
     let mut out: Vec<Box<dyn SearchFilter + Send + Sync>> = Vec::new();
     if filter_args.needs_approve {
-        out.push(Box::new(NeedsApproveSF));
+        out.push(Box::new(NeedsApproveSearch));
     }
     if filter_args.needs_lgtm {
-        out.push(Box::new(NeedsLgtmSF));
+        out.push(Box::new(NeedsLgtmSearch));
     }
     if filter_args.needs_ok_to_test {
-        out.push(Box::new(NeedsOkToTestSF));
+        out.push(Box::new(NeedsOkToTestSearch));
     }
 
     if !filter_args.label.is_empty() {
-        out.push(Box::new(LabelSF {
+        out.push(Box::new(LabelSearch {
             labels: filter_args.label.clone(),
         }));
     }
 
     if let Some(branch) = &filter_args.base {
-        out.push(Box::new(BaseBranchSF {
+        out.push(Box::new(BaseBranchSearch {
             branch: branch.clone(),
         }));
     }
@@ -754,45 +283,31 @@ fn cli_to_search_filters(filter_args: &FilterArgs) -> Vec<Box<dyn SearchFilter +
 fn cli_to_post_filters(filter_args: &FilterArgs) -> Result<Vec<Box<dyn PostFilter + Send + Sync>>> {
     let mut out: Vec<Box<dyn PostFilter + Send + Sync>> = Vec::new();
     if filter_args.failing_ci {
-        out.push(Box::new(FailingCiPF));
+        out.push(Box::new(FailingCiPost));
     }
     if let Some(name) = &filter_args.author {
-        out.push(Box::new(AuthorPF::new().with_value(name.clone())));
+        out.push(Box::new(AuthorPost::new().with_value(name.clone())));
     }
     if !filter_args.failing_check.is_empty() {
-        out.push(Box::new(FailingCheckPF {
+        out.push(Box::new(FailingCheckPost {
             check_names: filter_args.failing_check.clone(),
         }));
     }
     if let Some(title) = &filter_args.title {
-        out.push(Box::new(TitlePF::new().with_value(title.clone())));
+        out.push(Box::new(TitlePost::new().with_value(title.clone())));
     }
 
     if let Some(branch) = &filter_args.base {
-        out.push(Box::new(BaseBranchPF::new().with_value(branch.clone())));
+        out.push(Box::new(BaseBranchPost::new().with_value(branch.clone())));
     }
 
     if let Some(expr) = &filter_args.commits {
-        out.push(Box::new(CommitsPF {
+        out.push(Box::new(CommitsPost {
             expr: CommitExpr::parse(expr)?,
         }));
     }
 
     Ok(out)
-}
-
-fn format_user_query(query: &str) -> Result<String> {
-    let mut final_query = query.to_string();
-
-    if !final_query.contains("is:pr") {
-        final_query = format!("{final_query} is:pr");
-    }
-
-    if !final_query.contains("is:open") && !final_query.contains("is:closed") {
-        final_query = format!("{final_query} is:open");
-    }
-
-    Ok(final_query)
 }
 
 fn parse_throttle_duration(throttle_str: &str) -> Result<Duration> {
@@ -840,7 +355,7 @@ fn validate_pr_urls_against_repo(repos: &[String], prs: &[String]) -> Result<()>
 
     for pr in prs {
         if pr.starts_with("https://") {
-            let (pr_repo, _) = Repo::parse_url(pr)?;
+            let pr_repo = Repo::parse_url(pr)?;
             if pr_repo != expected_repo {
                 anyhow::bail!(
                     "PR URL {} is from {} but --repo specifies {}",
@@ -855,68 +370,21 @@ fn validate_pr_urls_against_repo(repos: &[String], prs: &[String]) -> Result<()>
     Ok(())
 }
 
-/// Expand a single positional PR token into one or more PR numbers.
-///
-/// Accepts a bare number ("123") or an inclusive hyphen range
-/// ("123-127"), the page-range form people already reach for.
-/// Both ends are included, so "123-127" yields 123 through 127. A
-/// range whose start exceeds its end is a typo, so it is rejected
-/// rather than silently swapped or expanded to nothing.
-fn expand_pr_token(pr: &str) -> Result<Vec<u64>> {
-    if let Ok(n) = pr.parse::<u64>() {
-        return Ok(vec![n]);
-    }
-
-    if let Some((start, end)) = pr.split_once('-')
-        && let (Ok(start), Ok(end)) = (start.parse::<u64>(), end.parse::<u64>())
-    {
-        if start > end {
-            anyhow::bail!("Invalid PR range '{pr}': start {start} is greater than end {end}");
-        }
-        return Ok((start..=end).collect());
-    }
-
-    anyhow::bail!(
-        "Invalid PR identifier '{pr}': expected a PR number (e.g. 123), an inclusive range (e.g. 123-127), or URL (e.g. https://github.com/owner/repo/pull/123)"
-    )
+fn parse_pr_args_to_identifiers(repos: &[Repo], prs: &[String]) -> Result<Vec<PrIdentifier>> {
+    parse_pr_identifiers(repos.first(), prs).map_err(anyhow::Error::new)
 }
 
-fn parse_pr_args_to_identifiers(repos: &[String], prs: &[String]) -> Result<Vec<(Repo, u64)>> {
-    let mut identifiers = Vec::new();
-
-    for pr in prs {
-        let pr = pr.trim(); // Trim whitespace from each value
-        if pr.is_empty() {
-            continue; // Skip empty strings silently (no-op)
-        }
-        if pr.starts_with("https://") {
-            let (repo, pr_number) = Repo::parse_url(pr)?;
-            let pr_number = pr_number
-                .ok_or_else(|| anyhow::anyhow!("URL must contain '/pull/' in the path"))?;
-            identifiers.push((repo, pr_number));
-        } else {
-            if repos.is_empty() {
-                anyhow::bail!("PR numbers require --repo to be specified");
-            }
-            // Should only be one repo if we got here (validated earlier)
-            let repo_id = Repo::parse(&repos[0])
-                .map_err(|e| anyhow::anyhow!("Invalid repository format '{}': {}", repos[0], e))?;
-
-            for pr_number in expand_pr_token(pr)? {
-                identifiers.push((repo_id.clone(), pr_number));
-            }
-        }
-    }
-
-    Ok(identifiers)
-}
-
-fn determine_display_mode(cli: &CliArgs) -> DisplayMode {
-    match (cli.quiet, cli.detailed, cli.detailed_with_logs) {
+fn determine_display_settings(cli: &CliArgs) -> DisplaySettings {
+    let mode = match (cli.quiet, cli.detailed, cli.detailed_with_logs) {
         (true, _, _) => DisplayMode::Quiet,
         (_, _, true) => DisplayMode::DetailedWithLogs,
         (_, true, _) => DisplayMode::Detailed,
         _ => DisplayMode::Normal,
+    };
+
+    DisplaySettings {
+        mode,
+        truncate_titles: cli.chop_long_lines,
     }
 }
 
@@ -934,14 +402,10 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
 
     validate_pr_urls_against_repo(&cli.repo, &cli.prs)?;
     validate_pr_urls_against_repo(&cli.repo, &cli.exclude)?;
-    let pr_identifiers = parse_pr_args_to_identifiers(&cli.repo, &cli.prs)?;
-    let exclude_identifiers = parse_pr_args_to_identifiers(&cli.repo, &cli.exclude)?;
+    let pr_identifiers = parse_pr_args_to_identifiers(&repos, &cli.prs)?;
+    let exclude_identifiers = parse_pr_args_to_identifiers(&repos, &cli.exclude)?;
 
-    let query = cli
-        .query
-        .as_ref()
-        .map(|q| format_user_query(q))
-        .transpose()?;
+    let query = cli.query.as_ref().map(|q| format_user_query(q));
 
     let throttle = cli
         .throttle
@@ -961,19 +425,24 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
     let history_max_comments = cli.history_max_comments.unwrap_or(10); // Default: 10
 
     Ok(QuerySpec {
-        repos,
-        prs: pr_identifiers,
-        exclude: exclude_identifiers,
-        query,
-        limit: cli.limit,
-        search_filters: cli_to_search_filters(&cli.filters),
-        post_filters: cli_to_post_filters(&cli.filters)?,
-        actions: cli_to_actions(&cli.actions, &cli.comment),
-        throttle,
-        history_max_age,
-        history_max_comments,
-        truncate_titles: cli.chop_long_lines,
-        commit_limit: cli.commit_limit,
+        fetch: FetchCriteria {
+            repos,
+            prs: pr_identifiers,
+            query,
+            limit: cli.limit,
+            search_filters: cli_to_search_filters(&cli.filters),
+        },
+        selection: SelectionPolicy {
+            exclude: exclude_identifiers,
+            post_filters: cli_to_post_filters(&cli.filters)?,
+        },
+        action_policy: ActionPolicy {
+            actions: cli_to_actions(&cli.actions, &cli.comment),
+            throttle,
+            history_max_age,
+            history_max_comments,
+            commit_limit: cli.commit_limit,
+        },
     })
 }
 
@@ -992,10 +461,10 @@ fn transform_slash_commands(args: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn build_query_from_cli(cli: CliArgs) -> Result<(QuerySpec, DisplayMode)> {
-    let display_mode = determine_display_mode(&cli);
-    let request = create_autoprat_request(cli)?;
-    Ok((request, display_mode))
+fn build_query_from_cli(cli: CliArgs) -> Result<AppRequest> {
+    let display = determine_display_settings(&cli);
+    let query = create_autoprat_request(cli)?;
+    Ok(AppRequest { query, display })
 }
 
 /// Parses command-line arguments into a query specification and display mode.
@@ -1003,7 +472,7 @@ fn build_query_from_cli(cli: CliArgs) -> Result<(QuerySpec, DisplayMode)> {
 /// Transforms slash commands (e.g., /retest) into standard arguments and
 /// validates all inputs according to CLI rules. Returns structured query
 /// parameters ready for execution.
-pub fn parse_args<I, T>(args: I) -> Result<(QuerySpec, DisplayMode)>
+pub fn parse_args<I, T>(args: I) -> Result<AppRequest>
 where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
@@ -1022,13 +491,14 @@ where
 mod tests {
     use super::*;
 
+    fn repos() -> Vec<Repo> {
+        vec![Repo::new("openshift", "bpfman-operator").unwrap()]
+    }
+
     #[test]
     fn parse_pr_args_to_identifiers_rejects_bare_dash_with_helpful_message() {
-        let err = parse_pr_args_to_identifiers(
-            &["openshift/bpfman-operator".to_string()],
-            &["-".to_string()],
-        )
-        .expect_err("expected bare '-' to be rejected");
+        let err = parse_pr_args_to_identifiers(&repos(), &["-".to_string()])
+            .expect_err("expected bare '-' to be rejected");
         let rendered = format!("{err:#}");
 
         assert!(
@@ -1047,11 +517,8 @@ mod tests {
 
     #[test]
     fn parse_pr_args_to_identifiers_rejects_non_numeric_with_helpful_message() {
-        let err = parse_pr_args_to_identifiers(
-            &["openshift/bpfman-operator".to_string()],
-            &["red-hat-konflux".to_string()],
-        )
-        .expect_err("expected non-numeric identifier to be rejected");
+        let err = parse_pr_args_to_identifiers(&repos(), &["red-hat-konflux".to_string()])
+            .expect_err("expected non-numeric identifier to be rejected");
         let rendered = format!("{err:#}");
 
         assert!(
@@ -1066,55 +533,43 @@ mod tests {
 
     #[test]
     fn parse_pr_args_to_identifiers_accepts_numeric_pr() {
-        let identifiers = parse_pr_args_to_identifiers(
-            &["openshift/bpfman-operator".to_string()],
-            &["123".to_string()],
-        )
-        .expect("numeric PR should parse");
+        let identifiers = parse_pr_args_to_identifiers(&repos(), &["123".to_string()])
+            .expect("numeric PR should parse");
         assert_eq!(identifiers.len(), 1);
-        assert_eq!(identifiers[0].1, 123);
+        assert_eq!(identifiers[0].number, 123);
     }
 
     #[test]
     fn parse_pr_args_to_identifiers_expands_inclusive_range() {
-        let identifiers = parse_pr_args_to_identifiers(
-            &["openshift/bpfman-operator".to_string()],
-            &["1967-1969".to_string()],
-        )
-        .expect("range should expand");
-        let numbers: Vec<u64> = identifiers.iter().map(|(_, n)| *n).collect();
+        let identifiers = parse_pr_args_to_identifiers(&repos(), &["1967-1969".to_string()])
+            .expect("range should expand");
+        let numbers: Vec<u64> = identifiers.iter().map(|id| id.number).collect();
         assert_eq!(numbers, vec![1967, 1968, 1969]);
     }
 
     #[test]
     fn parse_pr_args_to_identifiers_expands_multiple_ranges_and_singletons() {
         let identifiers = parse_pr_args_to_identifiers(
-            &["openshift/bpfman-operator".to_string()],
+            &repos(),
             &["1-3".to_string(), "9".to_string(), "11-12".to_string()],
         )
         .expect("mixed ranges and singletons should expand in order");
-        let numbers: Vec<u64> = identifiers.iter().map(|(_, n)| *n).collect();
+        let numbers: Vec<u64> = identifiers.iter().map(|id| id.number).collect();
         assert_eq!(numbers, vec![1, 2, 3, 9, 11, 12]);
     }
 
     #[test]
     fn parse_pr_args_to_identifiers_treats_equal_bounds_as_single_pr() {
-        let identifiers = parse_pr_args_to_identifiers(
-            &["openshift/bpfman-operator".to_string()],
-            &["42-42".to_string()],
-        )
-        .expect("degenerate range should yield one PR");
-        let numbers: Vec<u64> = identifiers.iter().map(|(_, n)| *n).collect();
+        let identifiers = parse_pr_args_to_identifiers(&repos(), &["42-42".to_string()])
+            .expect("degenerate range should yield one PR");
+        let numbers: Vec<u64> = identifiers.iter().map(|id| id.number).collect();
         assert_eq!(numbers, vec![42]);
     }
 
     #[test]
     fn parse_pr_args_to_identifiers_rejects_reversed_range() {
-        let err = parse_pr_args_to_identifiers(
-            &["openshift/bpfman-operator".to_string()],
-            &["1969-1967".to_string()],
-        )
-        .expect_err("reversed range should be rejected");
+        let err = parse_pr_args_to_identifiers(&repos(), &["1969-1967".to_string()])
+            .expect_err("reversed range should be rejected");
         let rendered = format!("{err:#}");
         assert!(
             rendered.contains("1969-1967"),

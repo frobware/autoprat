@@ -6,15 +6,22 @@
 //! searches with sophisticated filtering capabilities.
 
 pub mod cli;
+pub mod decision;
+pub mod filters;
 pub mod github;
+pub mod pr_selector;
 pub mod query;
+pub mod search;
+pub mod shell;
 pub mod types;
 
 pub use cli::parse_args;
 pub use github::GitHub;
+pub use pr_selector::{PrIdentifier, PrSelectorError};
 pub use query::fetch_pull_requests;
 pub use types::{
-    Action, CheckConclusion, CheckInfo, CheckName, CheckNameError, CheckRunStatus, CheckState,
-    CheckUrl, CommentInfo, DisplayMode, Forge, LogUrl, LogUrlError, PostFilter, PullRequest,
-    QueryResult, QuerySpec, Repo, RepoError, SearchFilter, Task,
+    ActionPolicy, AppRequest, CheckConclusion, CheckInfo, CheckName, CheckNameError,
+    CheckRunStatus, CheckState, CheckUrl, CommentAction, CommentInfo, DisplayMode, DisplaySettings,
+    FetchCriteria, Forge, LogUrl, LogUrlError, PostFilter, PrAction, PullRequest, QueryResult,
+    QuerySpec, Repo, RepoError, RepoUrlError, SearchFilter, SelectionPolicy, Task,
 };

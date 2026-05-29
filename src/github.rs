@@ -11,9 +11,13 @@ use serde::{Deserialize, Deserializer};
 use tracing::{debug, error, info, instrument, warn};
 use url::Url;
 
-use crate::types::{
-    CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, CheckUrl, CommentInfo,
-    PullRequest, Repo,
+use crate::{
+    pr_selector::PrIdentifier,
+    search::FetchPlan,
+    types::{
+        CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, CheckUrl, CommentInfo,
+        PullRequest, Repo,
+    },
 };
 
 #[derive(Debug, Deserialize)]
@@ -654,7 +658,7 @@ fn convert_graphql_pr_to_pr_info(
 fn convert_graphql_pr_to_pr_info_with_url_parsing(
     graphql_pr: GraphQLPullRequest,
 ) -> Result<PullRequest> {
-    let (repo, _) = Repo::parse_url(graphql_pr.url.as_str())?;
+    let repo = Repo::parse_url(graphql_pr.url.as_str())?;
     convert_graphql_pr_to_pr_info(graphql_pr, repo)
 }
 
@@ -695,18 +699,20 @@ async fn fetch_single_pr_by_query(
 #[instrument(skip(octocrab), fields(pr_count = pr_identifiers.len()))]
 async fn collect_specific_prs(
     octocrab: &Octocrab,
-    pr_identifiers: &[(Repo, u64)],
+    pr_identifiers: &[PrIdentifier],
 ) -> Result<Vec<PullRequest>> {
     info!("Collecting specific PRs");
     let mut all_prs = Vec::with_capacity(pr_identifiers.len());
 
-    for (repo, number) in pr_identifiers {
+    for identifier in pr_identifiers {
+        let repo = &identifier.repo;
+        let number = identifier.number;
         let search_query = format!("repo:{repo} type:pr {number}");
 
         if let Some(pr_info) =
             fetch_single_pr_by_query(octocrab, &search_query, repo.clone()).await?
         {
-            if pr_info.number == *number {
+            if pr_info.number == number {
                 all_prs.push(pr_info);
             } else {
                 warn!(
@@ -850,18 +856,12 @@ async fn verify_repository_exists(octocrab: &Octocrab, repo: &Repo) -> Result<()
     }
 }
 
-/// Fetches pull request data from GitHub according to the query spec.
+/// Fetches pull request data from GitHub according to a fetch plan.
 ///
 /// Handles both specific PR queries and search-based queries. Monitors
 /// rate limits and provides detailed instrumentation of the operation.
-#[instrument(skip(spec), fields(
-    has_specific_prs = !spec.prs.is_empty(),
-    pr_count = spec.prs.len(),
-    repo_count = spec.repos.len(),
-    has_custom_query = spec.query.is_some(),
-    limit = spec.limit
-))]
-async fn fetch_github_data(spec: &crate::types::QuerySpec) -> Result<Vec<PullRequest>> {
+#[instrument(skip(plan), fields(plan = ?plan))]
+async fn fetch_github_data(plan: &FetchPlan) -> Result<Vec<PullRequest>> {
     info!("Starting GitHub data fetch");
     let octocrab = setup_github_client().await?;
 
@@ -871,33 +871,35 @@ async fn fetch_github_data(spec: &crate::types::QuerySpec) -> Result<Vec<PullReq
         debug!("Rate limit check failed, continuing anyway: {}", e);
     }
 
-    let result = if !spec.prs.is_empty() {
-        debug!("Fetching specific PRs");
-        collect_specific_prs(&octocrab, &spec.prs).await
-    } else if spec.query.is_some() {
-        debug!("Using custom query");
-        let search_query = spec.query.as_ref().unwrap();
-        fetch_prs_with_pagination(&octocrab, search_query, spec.limit, None).await
-    } else if !spec.repos.is_empty() {
-        debug!("Fetching PRs from {} repo(s)", spec.repos.len());
-
-        // Verify all repositories exist before attempting to fetch PRs
-        for repo in &spec.repos {
-            verify_repository_exists(&octocrab, repo).await?;
+    let result = match plan {
+        FetchPlan::SpecificPullRequests(identifiers) => {
+            debug!("Fetching specific PRs");
+            collect_specific_prs(&octocrab, identifiers).await
         }
-
-        let mut all_prs = Vec::new();
-        for repo in &spec.repos {
-            let search_query = repo.build_search_query(&spec.search_filters);
-            let prs =
-                fetch_prs_with_pagination(&octocrab, &search_query, spec.limit, Some(repo.clone()))
-                    .await?;
-            all_prs.extend(prs);
+        FetchPlan::UserSearch { query, limit } => {
+            debug!("Using custom query");
+            fetch_prs_with_pagination(&octocrab, query, *limit, None).await
         }
-        Ok(all_prs)
-    } else {
-        error!("No query available for search");
-        anyhow::bail!("Query is required when not fetching specific PRs")
+        FetchPlan::RepositorySearches(searches) => {
+            debug!("Fetching PRs from {} repo(s)", searches.len());
+
+            for search in searches {
+                verify_repository_exists(&octocrab, &search.repo).await?;
+            }
+
+            let mut all_prs = Vec::new();
+            for search in searches {
+                let prs = fetch_prs_with_pagination(
+                    &octocrab,
+                    &search.query,
+                    search.limit,
+                    Some(search.repo.clone()),
+                )
+                .await?;
+                all_prs.extend(prs);
+            }
+            Ok(all_prs)
+        }
     };
 
     // Check rate limit after operations complete.
@@ -926,11 +928,8 @@ pub struct GitHub;
 
 #[async_trait]
 impl crate::types::Forge for GitHub {
-    async fn fetch_pull_requests(
-        &self,
-        spec: &crate::types::QuerySpec,
-    ) -> Result<Vec<PullRequest>> {
-        fetch_github_data(spec).await
+    async fn fetch_pull_requests(&self, plan: &FetchPlan) -> Result<Vec<PullRequest>> {
+        fetch_github_data(plan).await
     }
 }
 
@@ -1045,7 +1044,7 @@ mod tests {
     #[test]
     fn test_convert_graphql_pr_to_pr_info_with_repo_context() {
         let graphql_pr = create_test_graphql_pr();
-        let repo = Repo::new("owner".to_string(), "repo".to_string()).unwrap();
+        let repo = Repo::new("owner", "repo").unwrap();
 
         let result = convert_graphql_pr_to_pr_info(graphql_pr, repo.clone());
         assert!(result.is_ok());
@@ -1095,7 +1094,7 @@ mod tests {
             actor_type: ActorType::Bot,
         });
 
-        let repo = Repo::new("owner".to_string(), "repo".to_string()).unwrap();
+        let repo = Repo::new("owner", "repo").unwrap();
         let result = convert_graphql_pr_to_pr_info(graphql_pr, repo);
         assert!(result.is_ok());
 
@@ -1110,7 +1109,7 @@ mod tests {
         let mut graphql_pr = create_test_graphql_pr();
         graphql_pr.author = None;
 
-        let repo = Repo::new("owner".to_string(), "repo".to_string()).unwrap();
+        let repo = Repo::new("owner", "repo").unwrap();
         let result = convert_graphql_pr_to_pr_info(graphql_pr, repo);
         assert!(result.is_ok());
 
@@ -1125,7 +1124,7 @@ mod tests {
         let mut graphql_pr = create_test_graphql_pr();
         graphql_pr.status_check_rollup = None;
 
-        let repo = Repo::new("owner".to_string(), "repo".to_string()).unwrap();
+        let repo = Repo::new("owner", "repo").unwrap();
         let result = convert_graphql_pr_to_pr_info(graphql_pr, repo);
         assert!(result.is_ok());
 
@@ -1154,7 +1153,7 @@ mod tests {
             },
         });
 
-        let repo = Repo::new("owner".to_string(), "repo".to_string()).unwrap();
+        let repo = Repo::new("owner", "repo").unwrap();
         let result = convert_graphql_pr_to_pr_info(graphql_pr, repo);
         assert!(result.is_ok());
 
@@ -1179,7 +1178,7 @@ mod tests {
             },
         });
 
-        let repo = Repo::new("owner".to_string(), "repo".to_string()).unwrap();
+        let repo = Repo::new("owner", "repo").unwrap();
         let result = convert_graphql_pr_to_pr_info(graphql_pr, repo);
         assert!(result.is_ok());
 

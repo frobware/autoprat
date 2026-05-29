@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use url::Url;
 
+use crate::{pr_selector::PrIdentifier, search::FetchPlan};
+
 /// Error types for validation
 #[derive(Debug, Clone, PartialEq)]
 pub enum CheckNameError {
@@ -146,7 +148,7 @@ impl std::fmt::Display for LogUrl {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepoError {
     EmptyField,
     InvalidCharacter,
@@ -167,11 +169,65 @@ impl std::fmt::Display for RepoError {
 
 impl std::error::Error for RepoError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepoUrlError {
+    InvalidUrl {
+        input: String,
+        source: url::ParseError,
+    },
+    CannotParsePath {
+        input: String,
+    },
+    MissingOwnerAndRepository {
+        input: String,
+    },
+    InvalidRepository {
+        input: String,
+        source: RepoError,
+    },
+}
+
+impl std::fmt::Display for RepoUrlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RepoUrlError::InvalidUrl { input, source } => {
+                write!(f, "Failed to parse URL: '{input}': {source}")
+            }
+            RepoUrlError::CannotParsePath { input } => {
+                write!(f, "Cannot parse URL path: '{input}'")
+            }
+            RepoUrlError::MissingOwnerAndRepository { input } => {
+                write!(f, "URL must contain owner and repository name: '{input}'")
+            }
+            RepoUrlError::InvalidRepository { input, source } => {
+                write!(f, "Invalid repository in URL '{input}': {source}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RepoUrlError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            RepoUrlError::InvalidUrl { source, .. } => Some(source),
+            RepoUrlError::InvalidRepository { source, .. } => Some(source),
+            RepoUrlError::CannotParsePath { .. }
+            | RepoUrlError::MissingOwnerAndRepository { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ParsedForgeUrl {
+    pub(crate) repo: Repo,
+    pub(crate) path_segments: Vec<String>,
+}
+
 /// Repository identifier with owner and name.
 ///
 /// Represents a repository in "owner/name" format. Validates that
 /// neither component is empty or contains forward slashes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repo {
     owner: String,
     name: String,
@@ -204,61 +260,18 @@ impl Repo {
         Self::new(parts[0], parts[1])
     }
 
-    /// Parse repository information from any Git hosting URL
-    /// Returns (Repo, Option<u64>) where the u64 is the PR/MR number if present
+    /// Parse repository information from any Git hosting URL.
+    ///
+    /// This parser intentionally returns only repository identity. Pull request
+    /// selectors parse the PR number in `pr_selector`, where a missing PR
+    /// number is an error rather than an optional field.
     /// Works with URLs like:
-    /// - https://github.com/owner/repo → (repo, None)
-    /// - https://github.com/owner/repo/pull/123 → (repo, Some(123))
-    /// - https://gitlab.com/owner/repo/merge_requests/456 → (repo, Some(456))
-    /// - https://api.github.com/repos/owner/repo/pulls/123 → (repo, Some(123))
-    pub fn parse_url(url_str: &str) -> Result<(Self, Option<u64>)> {
-        use anyhow::Context;
-
-        let url =
-            Url::parse(url_str).with_context(|| format!("Failed to parse URL: '{url_str}'"))?;
-
-        let path_segments: Vec<&str> = url
-            .path_segments()
-            .context("Cannot parse URL path")?
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        let (owner, repo_name) =
-            if path_segments.first() == Some(&"repos") && path_segments.len() >= 3 {
-                // Handle API URLs like https://api.github.com/repos/owner/repo/...
-                (path_segments[1], path_segments[2])
-            } else if path_segments.len() >= 2 {
-                // Handle regular URLs like https://github.com/owner/repo/...
-                (path_segments[0], path_segments[1])
-            } else {
-                anyhow::bail!("URL must contain owner and repository name: '{}'", url_str);
-            };
-
-        let repo = Self::new(owner, repo_name)
-            .map_err(|e| anyhow::anyhow!("Invalid repository in URL '{}': {}", url_str, e))?;
-
-        // Look for PR/MR number in path - be liberal about patterns.
-        let pr_number = Self::extract_pr_number(&path_segments);
-
-        Ok((repo, pr_number))
-    }
-
-    /// Extract PR/MR number from path segments if present
-    /// Supports various Git hosting patterns: pull, pulls, merge_requests, pull-requests
-    fn extract_pr_number(path_segments: &[&str]) -> Option<u64> {
-        let pr_keywords = ["pull", "pulls", "merge_requests", "pull-requests"];
-
-        for keyword in &pr_keywords {
-            if let Some(index) = path_segments
-                .iter()
-                .position(|&segment| segment == *keyword)
-                && index + 1 < path_segments.len()
-                && let Ok(number) = path_segments[index + 1].parse::<u64>()
-            {
-                return Some(number);
-            }
-        }
-        None
+    /// - https://github.com/owner/repo → repo
+    /// - https://github.com/owner/repo/pull/123 → repo
+    /// - https://gitlab.com/owner/repo/merge_requests/456 → repo
+    /// - https://api.github.com/repos/owner/repo/pulls/123 → repo
+    pub fn parse_url(url_str: &str) -> std::result::Result<Self, RepoUrlError> {
+        parse_forge_url(url_str).map(|parsed| parsed.repo)
     }
 
     pub fn owner(&self) -> &str {
@@ -268,25 +281,48 @@ impl Repo {
     pub fn name(&self) -> &str {
         &self.name
     }
+}
 
-    pub fn build_search_query(
-        &self,
-        search_filters: &[Box<dyn SearchFilter + Send + Sync>],
-    ) -> String {
-        let mut parts = Vec::with_capacity(search_filters.len() + 4); // Base terms plus filters.
+pub(crate) fn parse_forge_url(url_str: &str) -> std::result::Result<ParsedForgeUrl, RepoUrlError> {
+    let url = Url::parse(url_str).map_err(|source| RepoUrlError::InvalidUrl {
+        input: url_str.to_string(),
+        source,
+    })?;
 
-        parts.push(format!("repo:{self}"));
+    let path_segments: Vec<String> = url
+        .path_segments()
+        .ok_or_else(|| RepoUrlError::CannotParsePath {
+            input: url_str.to_string(),
+        })?
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
 
-        for sf in search_filters {
-            sf.apply(&mut parts);
-        }
+    let (owner, repo_name) = if path_segments
+        .first()
+        .is_some_and(|segment| segment == "repos")
+        && path_segments.len() >= 3
+    {
+        // Handle API URLs like https://api.github.com/repos/owner/repo/...
+        (&path_segments[1], &path_segments[2])
+    } else if path_segments.len() >= 2 {
+        // Handle regular URLs like https://github.com/owner/repo/...
+        (&path_segments[0], &path_segments[1])
+    } else {
+        return Err(RepoUrlError::MissingOwnerAndRepository {
+            input: url_str.to_string(),
+        });
+    };
 
-        parts.push("type:pr".to_string());
-        parts.push("state:open".to_string());
-        parts.push("sort:created-asc".to_string());
+    let repo = Repo::new(owner, repo_name).map_err(|source| RepoUrlError::InvalidRepository {
+        input: url_str.to_string(),
+        source,
+    })?;
 
-        parts.join(" ")
-    }
+    Ok(ParsedForgeUrl {
+        repo,
+        path_segments,
+    })
 }
 
 impl std::fmt::Display for Repo {
@@ -296,7 +332,7 @@ impl std::fmt::Display for Repo {
 }
 
 /// Output format for displaying pull request information.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayMode {
     Normal,
     Quiet,
@@ -395,10 +431,6 @@ pub struct PullRequest {
 }
 
 impl PullRequest {
-    fn matches_repo_and_number(&self, repo: &Repo, number: u64) -> bool {
-        self.repo == *repo && self.number == number
-    }
-
     pub fn matches_author(&self, author: &str) -> bool {
         self.author_login == author
             || self.author_search_format == author
@@ -424,104 +456,16 @@ impl PullRequest {
     pub fn matches_base_branch(&self, branch: &str) -> bool {
         self.base_branch == branch
     }
-
-    pub fn was_comment_posted_recently(
-        &self,
-        comment_body: &str,
-        throttle_duration: Duration,
-    ) -> bool {
-        use chrono::Utc;
-
-        let now = Utc::now();
-        let throttle_seconds = throttle_duration.as_secs();
-        let cutoff_time = now - chrono::Duration::seconds(throttle_seconds as i64);
-
-        let target_command = comment_body.trim();
-
-        self.recent_comments.iter().any(|comment| {
-            comment.created_at > cutoff_time
-                && comment
-                    .body
-                    .lines()
-                    .any(|line| line.trim() == target_command)
-        })
-    }
-
-    /// Checks if a comment with the given body was posted recently in history.
-    ///
-    /// Returns true only if the comment exists within BOTH:
-    /// - The last N most recent comments (position-based), AND
-    /// - Within the specified duration (time-based)
-    ///
-    /// This prevents re-posting commands when GitHub is slow to apply labels,
-    /// whilst allowing re-posting when:
-    /// - The comment is older than the specified duration (likely a stale state)
-    /// - The comment has been pushed out by newer comments
-    /// - Labels were removed due to new commits
-    ///
-    /// # Arguments
-    ///
-    /// * `comment_body` - The comment text to search for
-    /// * `max_comments_to_check` - Maximum number of recent comments to examine
-    /// * `max_age` - Maximum age of comments to consider
-    pub fn was_comment_posted_in_history(
-        &self,
-        comment_body: &str,
-        max_comments_to_check: usize,
-        max_age: Duration,
-    ) -> bool {
-        use chrono::Utc;
-
-        let target_command = comment_body.trim();
-        let now = Utc::now();
-        let cutoff_time = now - chrono::Duration::seconds(max_age.as_secs() as i64);
-
-        self.recent_comments
-            .iter()
-            .rev() // Start from most recent
-            .take(max_comments_to_check)
-            .any(|comment| {
-                comment.created_at > cutoff_time
-                    && comment
-                        .body
-                        .lines()
-                        .any(|line| line.trim() == target_command)
-            })
-    }
-
-    pub fn matches_request(&self, request: &QuerySpec) -> bool {
-        // Check if this PR is explicitly excluded
-        let is_excluded = request
-            .exclude
-            .iter()
-            .any(|(repo, number)| self.matches_repo_and_number(repo, *number));
-
-        if is_excluded {
-            return false;
-        }
-
-        (request.prs.is_empty()
-            || request
-                .prs
-                .iter()
-                .any(|(repo, number)| self.matches_repo_and_number(repo, *number)))
-            && request.search_filters.iter().all(|sf| sf.matches(self))
-            && request.post_filters.iter().all(|pf| pf.matches(self))
-    }
 }
 
 /// Filter applied during GitHub search query construction.
 ///
 /// Modifies the search query sent to GitHub to limit results server-side.
-/// The `matches` method is primarily for testing and mocking.
+/// The `matches` method is used after fetches as the local counterpart
+/// to the server-side query term.
 pub trait SearchFilter: std::fmt::Debug + Send + Sync {
     fn apply(&self, terms: &mut Vec<String>);
-
-    /// Default is “always true” so you only need to override it when
-    /// mocking.
-    fn matches(&self, _pr: &PullRequest) -> bool {
-        true
-    }
+    fn matches(&self, pr: &PullRequest) -> bool;
 }
 
 /// Filter applied after fetching pull requests.
@@ -532,72 +476,85 @@ pub trait PostFilter: std::fmt::Debug + Send + Sync {
     fn matches(&self, pr: &PullRequest) -> bool;
 }
 
-/// Action that can be performed on a pull request.
-///
-/// Defines conditions for execution and optional comment text. Actions
-/// are only executed if `only_if` returns true for the specific PR.
-pub trait Action: std::fmt::Debug + Send + Sync {
-    fn name(&self) -> &'static str;
-    fn only_if(&self, pr_info: &PullRequest) -> bool;
-    fn get_comment_body(&self) -> Option<&str>;
-    fn clone_box(&self) -> Box<dyn Action + Send + Sync>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommentAction {
+    Approve,
+    Lgtm,
+    OkToTest,
+    Retest,
+    Hold,
+    Custom(String),
+}
 
-    /// Format the shell command to execute this action.
-    /// Each action knows how to execute itself - no hardcoded matching needed.
-    fn format_shell_command(&self, pr_info: &PullRequest) -> String {
-        // Default implementation for comment actions
-        if let Some(body) = self.get_comment_body() {
-            format!("gh pr comment {} --body \"{}\"", pr_info.url, body)
-        } else {
-            format!("# Unknown action: {}", self.name())
+impl CommentAction {
+    pub fn name(&self) -> &'static str {
+        match self {
+            CommentAction::Approve => "approve",
+            CommentAction::Lgtm => "lgtm",
+            CommentAction::OkToTest => "ok-to-test",
+            CommentAction::Retest => "retest",
+            CommentAction::Hold => "hold",
+            CommentAction::Custom(_) => "custom-comment",
         }
     }
 
-    /// Should this action be executed given the PR state and history?
-    /// Default checks comment history and throttling for comment actions.
-    fn should_execute(
-        &self,
-        pr: &PullRequest,
-        history_max_comments: usize,
-        history_max_age: Duration,
-        throttle: Option<Duration>,
-    ) -> bool {
-        if !self.only_if(pr) {
-            return false;
+    pub fn body(&self) -> &str {
+        match self {
+            CommentAction::Approve => "/approve",
+            CommentAction::Lgtm => "/lgtm",
+            CommentAction::OkToTest => "/ok-to-test",
+            CommentAction::Retest => "/retest",
+            CommentAction::Hold => "/hold",
+            CommentAction::Custom(comment) => comment,
         }
+    }
 
-        if let Some(body) = self.get_comment_body() {
-            // Check history
-            if pr.was_comment_posted_in_history(body, history_max_comments, history_max_age) {
-                return false;
-            }
-
-            // Check throttle
-            if let Some(duration) = throttle
-                && pr.was_comment_posted_recently(body, duration)
-            {
-                return false;
-            }
+    pub fn only_if(&self, pr: &PullRequest) -> bool {
+        match self {
+            CommentAction::Approve => !pr.has_label("approved"),
+            CommentAction::Lgtm => !pr.has_label("lgtm"),
+            CommentAction::OkToTest => pr.has_label("needs-ok-to-test"),
+            CommentAction::Retest | CommentAction::Custom(_) => true,
+            CommentAction::Hold => !pr.has_label("do-not-merge/hold"),
         }
-
-        true
     }
 }
 
-#[derive(Debug)]
-/// Represents an actionable task to be performed on a specific pull request.
-///
-/// A Task pairs a PullRequest with an Action, representing work that should be
-/// executed such as posting comments, approving, or running specific commands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrAction {
+    Comment(CommentAction),
+    GroupedComment(Vec<CommentAction>),
+    Close,
+    Merge,
+}
+
+impl PrAction {
+    pub fn comment(action: CommentAction) -> Self {
+        Self::Comment(action)
+    }
+
+    pub fn comments(actions: Vec<CommentAction>) -> Option<Self> {
+        match actions.len() {
+            0 => None,
+            1 => actions.into_iter().next().map(Self::Comment),
+            _ => Some(Self::GroupedComment(actions)),
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            PrAction::Comment(action) => action.name(),
+            PrAction::GroupedComment(_) => "grouped-comment",
+            PrAction::Close => "close",
+            PrAction::Merge => "merge",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Task {
     pub pr_info: PullRequest,
-    pub action: Box<dyn Action + Send + Sync>,
-}
-
-impl Clone for Box<dyn Action + Send + Sync> {
-    fn clone(&self) -> Box<dyn Action + Send + Sync> {
-        self.clone_box()
-    }
+    pub action: PrAction,
 }
 
 /// Abstraction for version control forges (GitHub, GitLab, etc.).
@@ -606,35 +563,57 @@ impl Clone for Box<dyn Action + Send + Sync> {
 /// platforms. Currently only GitHub is implemented.
 #[async_trait]
 pub trait Forge {
-    async fn fetch_pull_requests(&self, spec: &QuerySpec) -> Result<Vec<PullRequest>>;
+    async fn fetch_pull_requests(&self, plan: &FetchPlan) -> Result<Vec<PullRequest>>;
 }
 
-/// Specification for querying and processing pull requests.
-///
-/// Contains search criteria, filters, actions to perform, and execution
-/// parameters like throttling. Supports both specific PR lookups and
-/// broad searches.
 #[derive(Debug)]
-pub struct QuerySpec {
+pub struct FetchCriteria {
     pub repos: Vec<Repo>,
-    pub prs: Vec<(Repo, u64)>,
-    pub exclude: Vec<(Repo, u64)>,
+    pub prs: Vec<PrIdentifier>,
     pub query: Option<String>,
     pub limit: usize,
     pub search_filters: Vec<Box<dyn SearchFilter + Send + Sync>>,
+}
+
+#[derive(Debug)]
+pub struct SelectionPolicy {
+    pub exclude: Vec<PrIdentifier>,
     pub post_filters: Vec<Box<dyn PostFilter + Send + Sync>>,
-    pub actions: Vec<Box<dyn Action + Send + Sync>>,
+}
+
+#[derive(Debug)]
+pub struct ActionPolicy {
+    pub actions: Vec<PrAction>,
     pub throttle: Option<Duration>,
     pub history_max_age: Duration,
     pub history_max_comments: usize,
-    pub truncate_titles: bool,
     pub commit_limit: u64,
 }
 
-impl QuerySpec {
+impl ActionPolicy {
     pub fn has_actions(&self) -> bool {
         !self.actions.is_empty()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DisplaySettings {
+    pub mode: DisplayMode,
+    pub truncate_titles: bool,
+}
+
+/// Specification for querying and processing pull requests.
+#[derive(Debug)]
+pub struct QuerySpec {
+    pub fetch: FetchCriteria,
+    pub selection: SelectionPolicy,
+    pub action_policy: ActionPolicy,
+}
+
+#[derive(Debug)]
+pub struct AppRequest {
+    pub query: QuerySpec,
+    pub display: DisplaySettings,
 }
 
 /// Result of executing a pull request query.
@@ -654,72 +633,53 @@ mod tests {
     #[test]
     fn test_parse_url_formats() {
         let test_cases = [
-            // (url, expected_owner, expected_name, expected_pr_num).
-            ("https://github.com/owner/repo", "owner", "repo", None),
-            (
-                "https://github.com/owner/repo/pull/123",
-                "owner",
-                "repo",
-                Some(123),
-            ),
+            ("https://github.com/owner/repo", "owner", "repo"),
+            ("https://github.com/owner/repo/pull/123", "owner", "repo"),
             (
                 "https://api.github.com/repos/owner/repo/pulls/123",
                 "owner",
                 "repo",
-                Some(123),
             ),
             (
                 "https://github.enterprise.com/owner/repo/pull/456",
                 "owner",
                 "repo",
-                Some(456),
             ),
             (
                 "https://gitlab.com/owner/repo/merge_requests/789",
                 "owner",
                 "repo",
-                Some(789),
             ),
             (
                 "https://bitbucket.org/owner/repo/pull-requests/321",
                 "owner",
                 "repo",
-                Some(321),
             ),
         ];
 
-        for (url, expected_owner, expected_name, expected_pr_num) in test_cases {
-            let (repo, pr_num) = Repo::parse_url(url).unwrap();
+        for (url, expected_owner, expected_name) in test_cases {
+            let repo = Repo::parse_url(url).unwrap();
             assert_eq!(repo.owner(), expected_owner, "Failed for URL: {}", url);
             assert_eq!(repo.name(), expected_name, "Failed for URL: {}", url);
-            assert_eq!(pr_num, expected_pr_num, "Failed for URL: {}", url);
         }
     }
 
     #[test]
     fn test_parse_url_edge_cases() {
         let test_cases = [
-            // (url, expected_owner, expected_name, expected_pr_num).
-            ("https://github.com/owner/repo/", "owner", "repo", None),
+            ("https://github.com/owner/repo/", "owner", "repo"),
             (
                 "https://github.com/owner/repo/pull/789/files",
                 "owner",
                 "repo",
-                Some(789),
             ),
-            (
-                "https://github.com/owner/repo/issues/123",
-                "owner",
-                "repo",
-                None,
-            ), // Issues don't count as PR numbers.
+            ("https://github.com/owner/repo/issues/123", "owner", "repo"),
         ];
 
-        for (url, expected_owner, expected_name, expected_pr_num) in test_cases {
-            let (repo, pr_num) = Repo::parse_url(url).unwrap();
+        for (url, expected_owner, expected_name) in test_cases {
+            let repo = Repo::parse_url(url).unwrap();
             assert_eq!(repo.owner(), expected_owner, "Failed for URL: {}", url);
             assert_eq!(repo.name(), expected_name, "Failed for URL: {}", url);
-            assert_eq!(pr_num, expected_pr_num, "Failed for URL: {}", url);
         }
     }
 
