@@ -3580,6 +3580,45 @@ async fn test_exclude_with_specific_pr_list() {
 }
 
 #[tokio::test]
+async fn test_exclude_range_and_singleton_from_targeted_range() {
+    // Target an inclusive range that spans every mock PR (123-131),
+    // then carve out a sub-range and a single PR with --exclude. The
+    // survivors are the targeted set minus both exclusions.
+    let mock_data = create_mock_github_data();
+    let provider = MockHub::new(mock_data);
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "1-200", // Target every PR by inclusive range
+            "--exclude",
+            "124-126", // Exclude a sub-range
+            "--exclude",
+            "131", // Exclude a single PR
+            "--approve",
+        ],
+        &provider,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    let result = result.unwrap();
+
+    let mut pr_numbers: Vec<u64> = result.filtered_prs.iter().map(|pr| pr.number).collect();
+    pr_numbers.sort_unstable();
+    assert_eq!(pr_numbers, vec![123, 127, 128, 129, 130]);
+
+    let excluded_actions = result
+        .executable_actions
+        .iter()
+        .filter(|action| matches!(action.pr_info.number, 124 | 125 | 126 | 131))
+        .count();
+    assert_eq!(excluded_actions, 0);
+}
+
+#[tokio::test]
 async fn test_exclude_validation_requires_repo() {
     // Test: --exclude with PR numbers requires --repo
     let provider = MockHub::new(vec![]);
