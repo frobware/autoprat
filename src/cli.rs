@@ -563,14 +563,14 @@ struct CliArgs {
     #[arg(short = 'r', long = "repo", value_name = "OWNER/REPO")]
     pub repo: Vec<String>,
 
-    /// PR-NUMBER|PR-URL ...
+    /// PR-NUMBER|PR-RANGE|PR-URL ... (a range is inclusive, e.g. 123-127)
     pub prs: Vec<String>,
 
     /// Exclude specific PRs from processing (can specify multiple or comma-separated)
     #[arg(
         short = 'E',
         long = "exclude",
-        value_name = "PR-NUMBER|PR-URL",
+        value_name = "PR-NUMBER|PR-RANGE|PR-URL",
         value_delimiter = ','
     )]
     pub exclude: Vec<String>,
@@ -855,6 +855,32 @@ fn validate_pr_urls_against_repo(repos: &[String], prs: &[String]) -> Result<()>
     Ok(())
 }
 
+/// Expand a single positional PR token into one or more PR numbers.
+///
+/// Accepts a bare number ("123") or an inclusive hyphen range
+/// ("123-127"), the page-range form people already reach for.
+/// Both ends are included, so "123-127" yields 123 through 127. A
+/// range whose start exceeds its end is a typo, so it is rejected
+/// rather than silently swapped or expanded to nothing.
+fn expand_pr_token(pr: &str) -> Result<Vec<u64>> {
+    if let Ok(n) = pr.parse::<u64>() {
+        return Ok(vec![n]);
+    }
+
+    if let Some((start, end)) = pr.split_once('-')
+        && let (Ok(start), Ok(end)) = (start.parse::<u64>(), end.parse::<u64>())
+    {
+        if start > end {
+            anyhow::bail!("Invalid PR range '{pr}': start {start} is greater than end {end}");
+        }
+        return Ok((start..=end).collect());
+    }
+
+    anyhow::bail!(
+        "Invalid PR identifier '{pr}': expected a PR number (e.g. 123), an inclusive range (e.g. 123-127), or URL (e.g. https://github.com/owner/repo/pull/123)"
+    )
+}
+
 fn parse_pr_args_to_identifiers(repos: &[String], prs: &[String]) -> Result<Vec<(Repo, u64)>> {
     let mut identifiers = Vec::new();
 
@@ -876,13 +902,9 @@ fn parse_pr_args_to_identifiers(repos: &[String], prs: &[String]) -> Result<Vec<
             let repo_id = Repo::parse(&repos[0])
                 .map_err(|e| anyhow::anyhow!("Invalid repository format '{}': {}", repos[0], e))?;
 
-            let pr_number: u64 = pr.parse().map_err(|_| {
-                anyhow::anyhow!(
-                    "Invalid PR identifier '{pr}': expected a PR number (e.g. 123) or URL (e.g. https://github.com/owner/repo/pull/123)"
-                )
-            })?;
-
-            identifiers.push((repo_id, pr_number));
+            for pr_number in expand_pr_token(pr)? {
+                identifiers.push((repo_id.clone(), pr_number));
+            }
         }
     }
 
@@ -1051,5 +1073,56 @@ mod tests {
         .expect("numeric PR should parse");
         assert_eq!(identifiers.len(), 1);
         assert_eq!(identifiers[0].1, 123);
+    }
+
+    #[test]
+    fn parse_pr_args_to_identifiers_expands_inclusive_range() {
+        let identifiers = parse_pr_args_to_identifiers(
+            &["openshift/bpfman-operator".to_string()],
+            &["1967-1969".to_string()],
+        )
+        .expect("range should expand");
+        let numbers: Vec<u64> = identifiers.iter().map(|(_, n)| *n).collect();
+        assert_eq!(numbers, vec![1967, 1968, 1969]);
+    }
+
+    #[test]
+    fn parse_pr_args_to_identifiers_expands_multiple_ranges_and_singletons() {
+        let identifiers = parse_pr_args_to_identifiers(
+            &["openshift/bpfman-operator".to_string()],
+            &["1-3".to_string(), "9".to_string(), "11-12".to_string()],
+        )
+        .expect("mixed ranges and singletons should expand in order");
+        let numbers: Vec<u64> = identifiers.iter().map(|(_, n)| *n).collect();
+        assert_eq!(numbers, vec![1, 2, 3, 9, 11, 12]);
+    }
+
+    #[test]
+    fn parse_pr_args_to_identifiers_treats_equal_bounds_as_single_pr() {
+        let identifiers = parse_pr_args_to_identifiers(
+            &["openshift/bpfman-operator".to_string()],
+            &["42-42".to_string()],
+        )
+        .expect("degenerate range should yield one PR");
+        let numbers: Vec<u64> = identifiers.iter().map(|(_, n)| *n).collect();
+        assert_eq!(numbers, vec![42]);
+    }
+
+    #[test]
+    fn parse_pr_args_to_identifiers_rejects_reversed_range() {
+        let err = parse_pr_args_to_identifiers(
+            &["openshift/bpfman-operator".to_string()],
+            &["1969-1967".to_string()],
+        )
+        .expect_err("reversed range should be rejected");
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("1969-1967"),
+            "error should quote the offending range, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("1969") && rendered.contains("1967"),
+            "error should name both bounds, got: {rendered}"
+        );
     }
 }

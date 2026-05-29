@@ -43,8 +43,9 @@ cargo install --git https://github.com/frobware/autoprat.git
 # See what needs your attention.
 autoprat -r your-org/your-repo --needs-approve --needs-lgtm
 
-# Focus on specific PRs by number or URL.
+# Focus on specific PRs by number, inclusive range, or URL.
 autoprat -r your-org/your-repo --detailed 123 456
+autoprat -r your-org/your-repo --detailed 123-127 200
 autoprat --detailed https://github.com/your-org/your-repo/pull/123
 
 # Exclude specific PRs from processing.
@@ -285,7 +286,7 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 - `-r, --repo <REPO>` - GitHub repository in format 'owner/repo' (can specify multiple to query across repositories)
 
 ### Positional Arguments
-- `[PRS]...` - Focus on specific PRs by number or URL (can specify multiple)
+- `[PRS]...` - Focus on specific PRs by number, inclusive range (e.g. `123-127`), or URL (can specify multiple)
   - Numbers: `123 456` (requires `--repo`)
   - URLs: `https://github.com/owner/repo/pull/123`
   - Mixed: `123 https://github.com/owner/repo/pull/456` (requires `--repo` for numeric args)
@@ -294,6 +295,7 @@ autoprat -r myorg/myrepo --needs-approve --approve | sh
 ### Exclusions
 - `-E, --exclude <PR>` - Exclude specific PRs from processing (can specify multiple or comma-separated)
   - Numbers: `--exclude 123,456` (requires `--repo`)
+  - Inclusive ranges: `--exclude 124-126` (requires `--repo`)
   - URLs: `--exclude https://github.com/owner/repo/pull/123`
   - Mixed: `--exclude 123 --exclude https://github.com/owner/repo/pull/456`
   - Spaces friendly: `--exclude "123, 456"` (automatically trimmed)
@@ -388,7 +390,7 @@ cp target/release/autoprat ~/.local/bin/autoprat
 
 1. **Start with filters** - Run without action flags to see which PRs match
 2. **Review before executing** - Always check generated commands first
-3. **Focus on specific PRs** - Add PR numbers or URLs as arguments: `autoprat -r repo -d 123 456` or `autoprat -d https://github.com/owner/repo/pull/123`
+3. **Focus on specific PRs** - Add PR numbers, inclusive ranges, or URLs as arguments: `autoprat -r repo -d 123 456`, `autoprat -r repo -d 123-127`, or `autoprat -d https://github.com/owner/repo/pull/123`
    **Multi-repository** - Monitor PRs across repositories: `autoprat -d https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456`
 4. **Exclude problematic PRs** - Use `--exclude` to skip specific PRs: `autoprat -r repo --approve --exclude 123,456`
 5. **Use throttling** - Prevent spam with `--throttle` in automated workflows
