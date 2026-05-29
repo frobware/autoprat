@@ -1019,33 +1019,26 @@ mod tests {
 
         let result = String::from_utf8(output).unwrap();
 
-        // No header row, no separator, exactly one record per PR.
+        // No header row, no separator, exactly one machine-readable record per PR.
         assert!(!result.contains("URL"));
         assert!(!result.contains("CREATED AT"));
         assert!(!result.contains("---"));
-        assert_eq!(result.lines().count(), 1);
-
-        let line = result.lines().next().unwrap();
-        let fields: Vec<&str> = line.split('\t').collect();
-
-        // URL, BRANCH, CI, APP, LGTM, OK2TST, HOLD, COMMITS, AUTHOR, CREATED, TITLE.
-        assert_eq!(fields.len(), 11);
-        assert_eq!(fields[0], "https://github.com/owner/repo/pull/101");
-        assert_eq!(fields[1], "main");
-        assert_eq!(fields[3], "1"); // approved.
-        assert_eq!(fields[4], "0"); // lgtm.
-        assert_eq!(fields[5], "0"); // ok-to-test.
-        assert_eq!(fields[6], "0"); // hold.
-        assert_eq!(fields[7], "1"); // commits.
-        assert_eq!(fields[8], "alice");
-        // Created at should be RFC3339 with seconds precision and a Z suffix.
-        assert!(
-            fields[9].ends_with('Z'),
-            "expected RFC3339 timestamp, got {}",
-            fields[9]
+        assert_eq!(
+            result,
+            concat!(
+                "https://github.com/owner/repo/pull/101\t",
+                "main\t",
+                "Failed: 1/2\t",
+                "1\t",
+                "0\t",
+                "0\t",
+                "0\t",
+                "1\t",
+                "alice\t",
+                "2024-01-15T05:00:00Z\t",
+                "Add authentication system\n",
+            )
         );
-        assert!(fields[9].contains('T'));
-        assert_eq!(fields[10], "Add authentication system");
     }
 
     #[tokio::test]
