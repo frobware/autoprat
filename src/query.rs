@@ -1,4 +1,10 @@
-use crate::types::{Forge, PullRequest, QueryResult, QuerySpec, Task};
+use chrono::Utc;
+
+use crate::{
+    decision::{commit_limit_offenders, generate_executable_actions, pull_request_matches},
+    search::FetchPlan,
+    types::{Forge, PullRequest, QueryResult, QuerySpec, Task},
+};
 
 /// Fetches and filters pull requests according to the query specification.
 ///
@@ -9,16 +15,19 @@ pub async fn fetch_pull_requests<F>(request: &QuerySpec, forge: &F) -> anyhow::R
 where
     F: Forge + Sync,
 {
-    let all_prs = forge.fetch_pull_requests(request).await?;
+    let fetch_plan = FetchPlan::from_criteria(&request.fetch)
+        .ok_or_else(|| anyhow::anyhow!("Query is required when not fetching specific PRs"))?;
+    let all_prs = forge.fetch_pull_requests(&fetch_plan).await?;
 
     let filtered_prs: Vec<PullRequest> = all_prs
         .into_iter()
-        .filter(|pr| pr.matches_request(request))
+        .filter(|pr| pull_request_matches(pr, &request.fetch, &request.selection))
         .collect();
 
-    let executable_actions = generate_executable_actions(&filtered_prs, request);
+    let executable_actions =
+        generate_executable_actions(&filtered_prs, &request.action_policy, Utc::now());
 
-    enforce_commit_limit(&executable_actions, request.commit_limit)?;
+    enforce_commit_limit(&executable_actions, request.action_policy.commit_limit)?;
 
     Ok(QueryResult {
         filtered_prs,
@@ -27,14 +36,7 @@ where
 }
 
 fn enforce_commit_limit(tasks: &[Task], limit: u64) -> anyhow::Result<()> {
-    use std::collections::BTreeMap;
-
-    let mut offenders: BTreeMap<&str, u64> = BTreeMap::new();
-    for task in tasks {
-        if task.pr_info.commit_count > limit {
-            offenders.insert(&task.pr_info.url, task.pr_info.commit_count);
-        }
-    }
+    let offenders = commit_limit_offenders(tasks, limit);
 
     if offenders.is_empty() {
         return Ok(());
@@ -45,33 +47,14 @@ fn enforce_commit_limit(tasks: &[Task], limit: u64) -> anyhow::Result<()> {
         offenders.len(),
         limit
     );
-    for (url, count) in &offenders {
-        msg.push_str(&format!("\n  {url} ({count} commits)"));
+    for offender in &offenders {
+        msg.push_str(&format!(
+            "\n  {} ({} commits)",
+            offender.url, offender.commit_count
+        ));
     }
     msg.push_str(
         "\nRe-run with --commit-limit <N> to raise the threshold, or --exclude the PR(s).",
     );
     anyhow::bail!(msg)
-}
-
-fn generate_executable_actions(filtered_prs: &[PullRequest], request: &QuerySpec) -> Vec<Task> {
-    let mut executable_actions = Vec::with_capacity(filtered_prs.len() * request.actions.len());
-
-    for pr in filtered_prs {
-        for action in &request.actions {
-            if action.should_execute(
-                pr,
-                request.history_max_comments,
-                request.history_max_age,
-                request.throttle,
-            ) {
-                executable_actions.push(Task {
-                    pr_info: pr.clone(),
-                    action: action.clone(),
-                });
-            }
-        }
-    }
-
-    executable_actions
 }

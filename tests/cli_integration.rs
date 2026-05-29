@@ -1,14 +1,15 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use autoprat::{
-    CheckConclusion, CheckInfo, CheckName, CheckState, CheckUrl, CommentInfo, DisplayMode, Forge,
-    PullRequest, QueryResult, QuerySpec, Repo, fetch_pull_requests, parse_args,
+    AppRequest, CheckConclusion, CheckInfo, CheckName, CheckState, CheckUrl, CommentAction,
+    CommentInfo, DisplayMode, Forge, PrAction, PullRequest, QueryResult, Repo, fetch_pull_requests,
+    parse_args, search::FetchPlan,
 };
 use chrono::Utc;
 
-/// Build QuerySpec from raw command-line arguments (for tests)
+/// Build AppRequest from raw command-line arguments (for tests)
 /// This is the test-friendly interface that handles parsing internally
-fn build_request_from_args(raw_args: Vec<&str>) -> Result<(QuerySpec, DisplayMode)> {
+fn build_request_from_args(raw_args: Vec<&str>) -> Result<AppRequest> {
     parse_args_and_create_request_from(raw_args)
 }
 
@@ -25,14 +26,14 @@ impl MockHub {
 
 #[async_trait]
 impl Forge for MockHub {
-    async fn fetch_pull_requests(&self, _spec: &QuerySpec) -> Result<Vec<PullRequest>> {
+    async fn fetch_pull_requests(&self, _plan: &FetchPlan) -> Result<Vec<PullRequest>> {
         Ok(self.mock_data.clone())
     }
 }
 
-/// Parse command-line arguments from provided args and create QuerySpec and DisplayMode
+/// Parse command-line arguments from provided args and create AppRequest
 /// This is a test-friendly interface that works with explicit arguments
-fn parse_args_and_create_request_from<I, T>(args: I) -> Result<(QuerySpec, DisplayMode)>
+fn parse_args_and_create_request_from<I, T>(args: I) -> Result<AppRequest>
 where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
@@ -45,8 +46,8 @@ async fn run_autoprat_test<F>(raw_args: Vec<&str>, forge: &F) -> anyhow::Result<
 where
     F: Forge + Sync,
 {
-    let (request, _display_mode) = build_request_from_args(raw_args)?;
-    fetch_pull_requests(&request, forge).await
+    let request = build_request_from_args(raw_args)?;
+    fetch_pull_requests(&request.query, forge).await
 }
 
 /// Helper to create a test repo
@@ -1630,8 +1631,8 @@ async fn test_cli_validation_invalid_pr_url_format() {
 
     // Should either succeed (if URLs are passed through) or fail with clear error
     // The behavior depends on how strict URL validation is
-    if result.is_err() {
-        let error_msg = result.unwrap_err().to_string();
+    if let Err(error) = result {
+        let error_msg = error.to_string();
         assert!(error_msg.contains("URL") || error_msg.contains("format"));
     }
 }
@@ -1786,8 +1787,8 @@ async fn test_cli_validation_malformed_throttle() {
         .await;
 
         // Should either fail during parsing or during execution
-        if result.is_err() {
-            let error_msg = result.unwrap_err().to_string();
+        if let Err(error) = result {
+            let error_msg = error.to_string();
             assert!(
                 error_msg.contains("throttle")
                     || error_msg.contains("duration")
@@ -2017,10 +2018,9 @@ async fn test_action_ok_to_test() {
     assert_eq!(result.executable_actions[0].pr_info.number, 130);
 
     // Action should be "ok-to-test" comment action
-    assert_eq!(result.executable_actions[0].action.name(), "ok-to-test");
     assert_eq!(
-        result.executable_actions[0].action.get_comment_body(),
-        Some("/ok-to-test")
+        result.executable_actions[0].action,
+        PrAction::comment(CommentAction::OkToTest)
     );
 }
 
@@ -2071,10 +2071,9 @@ async fn test_filter_needs_ok_to_test_with_action() {
     // Should have one executable action for the filtered PR
     assert_eq!(result.executable_actions.len(), 1);
     assert_eq!(result.executable_actions[0].pr_info.number, 130);
-    assert_eq!(result.executable_actions[0].action.name(), "ok-to-test");
     assert_eq!(
-        result.executable_actions[0].action.get_comment_body(),
-        Some("/ok-to-test")
+        result.executable_actions[0].action,
+        PrAction::comment(CommentAction::OkToTest)
     );
 }
 
@@ -2097,9 +2096,7 @@ async fn test_action_close() {
 
     // All actions should be "close" actions
     for action in &result.executable_actions {
-        assert_eq!(action.action.name(), "close");
-        // Close action should not have a comment body (it's a direct action)
-        assert_eq!(action.action.get_comment_body(), None);
+        assert_eq!(action.action, PrAction::Close);
     }
 
     // Verify all PR numbers are present
@@ -2155,8 +2152,7 @@ async fn test_action_close_with_filters() {
 
     // All should be close actions
     for action in &result.executable_actions {
-        assert_eq!(action.action.name(), "close");
-        assert_eq!(action.action.get_comment_body(), None);
+        assert_eq!(action.action, PrAction::Close);
     }
 }
 
@@ -2201,10 +2197,10 @@ async fn test_action_close_with_multiple_actions() {
     assert_eq!(approve_actions, 1); // Only PR 125 needs approval (PR 129 already approved)
     assert_eq!(close_actions, 2); // Both PRs get close actions
 
-    // Verify close actions have no comment body
+    // Verify close actions are represented directly
     for action in &result.executable_actions {
         if action.action.name() == "close" {
-            assert_eq!(action.action.get_comment_body(), None);
+            assert_eq!(action.action, PrAction::Close);
         }
     }
 }
@@ -2316,16 +2312,27 @@ async fn test_multiple_comments_with_throttling() {
     assert!(result.is_ok());
 
     let result = result.unwrap();
-    // Comments are grouped: 2 comments per PR = 1 grouped action per PR.
-    // The grouped action executes if ANY sub-action should execute.
     // PR 123 has "Needs attention" throttled, but "Please review" is not,
-    // so the grouped action still executes for all 9 PRs.
+    // so it is planned as a single custom comment. Other PRs keep the grouped
+    // action because both comments are executable.
     assert_eq!(result.executable_actions.len(), 9);
 
-    // All actions should be grouped
-    for action in &result.executable_actions {
-        assert_eq!(action.action.name(), "grouped-comment");
-    }
+    let pr_123_action = result
+        .executable_actions
+        .iter()
+        .find(|action| action.pr_info.number == 123)
+        .expect("PR 123 should still have the non-throttled comment");
+    assert_eq!(
+        pr_123_action.action,
+        PrAction::comment(CommentAction::Custom("Please review".to_string()))
+    );
+
+    let grouped_count = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.action.name() == "grouped-comment")
+        .count();
+    assert_eq!(grouped_count, 8);
 }
 
 #[tokio::test]
@@ -2462,8 +2469,7 @@ async fn test_filter_needs_lgtm_with_action() {
 
     // All actions should be lgtm actions
     for action in &result.executable_actions {
-        assert_eq!(action.action.name(), "lgtm");
-        assert_eq!(action.action.get_comment_body(), Some("/lgtm"));
+        assert_eq!(action.action, PrAction::comment(CommentAction::Lgtm));
     }
 
     // Verify PR 131 is NOT in the executable actions
@@ -2556,13 +2562,16 @@ fn test_parse_args_and_create_request_from() {
     ]);
     assert!(result.is_ok());
 
-    let (request, display_mode) = result.unwrap();
-    assert_eq!(request.repos.len(), 1);
-    assert_eq!(request.repos[0].to_string(), "owner/repo");
+    let request = result.unwrap();
+    assert_eq!(request.query.fetch.repos.len(), 1);
+    assert_eq!(request.query.fetch.repos[0].to_string(), "owner/repo");
     // Approve and custom comment are grouped into a single action
-    assert_eq!(request.actions.len(), 1);
-    assert_eq!(request.actions[0].name(), "grouped-comment");
-    assert_eq!(display_mode, DisplayMode::Normal);
+    assert_eq!(request.query.action_policy.actions.len(), 1);
+    assert_eq!(
+        request.query.action_policy.actions[0].name(),
+        "grouped-comment"
+    );
+    assert_eq!(request.display.mode, DisplayMode::Normal);
 }
 
 #[test]
@@ -2578,10 +2587,13 @@ fn test_parse_args_with_slash_commands() {
     ]);
     assert!(result.is_ok());
 
-    let (request, _) = result.unwrap();
+    let request = result.unwrap();
     // With grouping, approve/lgtm/ok-to-test are combined into 1 grouped action
-    assert_eq!(request.actions.len(), 1);
-    assert_eq!(request.actions[0].name(), "grouped-comment");
+    assert_eq!(request.query.action_policy.actions.len(), 1);
+    assert_eq!(
+        request.query.action_policy.actions[0].name(),
+        "grouped-comment"
+    );
 }
 
 #[test]
@@ -2594,7 +2606,7 @@ fn test_non_github_url_accepted() {
     ]);
     assert!(result.is_ok()); // Should parse successfully
 
-    let (_request, _display_mode) = result.unwrap();
+    let _request = result.unwrap();
     // The error will happen when we try to fetch from GitHub API
 }
 
@@ -2657,8 +2669,8 @@ fn test_detailed_display_mode() {
         parse_args_and_create_request_from(vec!["autoprat", "--repo", "owner/repo", "--detailed"]);
     assert!(result.is_ok());
 
-    let (_, display_mode) = result.unwrap();
-    assert_eq!(display_mode, DisplayMode::Detailed);
+    let request = result.unwrap();
+    assert_eq!(request.display.mode, DisplayMode::Detailed);
 }
 
 #[test]
@@ -2672,8 +2684,8 @@ fn test_detailed_with_logs_display_mode() {
     ]);
     assert!(result.is_ok());
 
-    let (_, display_mode) = result.unwrap();
-    assert_eq!(display_mode, DisplayMode::DetailedWithLogs);
+    let request = result.unwrap();
+    assert_eq!(request.display.mode, DisplayMode::DetailedWithLogs);
 }
 
 #[test]
@@ -2682,8 +2694,8 @@ fn test_detailed_short_flag() {
     let result = parse_args_and_create_request_from(vec!["autoprat", "--repo", "owner/repo", "-d"]);
     assert!(result.is_ok());
 
-    let (_, display_mode) = result.unwrap();
-    assert_eq!(display_mode, DisplayMode::Detailed);
+    let request = result.unwrap();
+    assert_eq!(request.display.mode, DisplayMode::Detailed);
 }
 
 #[test]
@@ -2692,8 +2704,8 @@ fn test_detailed_with_logs_short_flag() {
     let result = parse_args_and_create_request_from(vec!["autoprat", "--repo", "owner/repo", "-D"]);
     assert!(result.is_ok());
 
-    let (_, display_mode) = result.unwrap();
-    assert_eq!(display_mode, DisplayMode::DetailedWithLogs);
+    let request = result.unwrap();
+    assert_eq!(request.display.mode, DisplayMode::DetailedWithLogs);
 }
 
 #[test]
@@ -2703,9 +2715,9 @@ fn test_retest_action() {
         parse_args_and_create_request_from(vec!["autoprat", "--repo", "owner/repo", "--retest"]);
     assert!(result.is_ok());
 
-    let (request, _) = result.unwrap();
-    assert_eq!(request.actions.len(), 1);
-    assert_eq!(request.actions[0].name(), "retest");
+    let request = result.unwrap();
+    assert_eq!(request.query.action_policy.actions.len(), 1);
+    assert_eq!(request.query.action_policy.actions[0].name(), "retest");
 }
 
 #[test]
@@ -2951,7 +2963,7 @@ async fn test_output_selection_with_actions() {
 
     // Test case: Actions requested but no PRs match action conditions
     // Should output empty shell commands, not table
-    let (request, _display_mode) = build_request_from_args(vec![
+    let request = build_request_from_args(vec![
         "autoprat",
         "--repo",
         "owner/repo",
@@ -2961,13 +2973,15 @@ async fn test_output_selection_with_actions() {
     .unwrap();
 
     // Check has_actions before consuming the request
-    let should_output_commands = request.has_actions();
+    let should_output_commands = request.query.action_policy.has_actions();
     assert!(
         should_output_commands,
         "Request should indicate actions were requested"
     );
 
-    let result = fetch_pull_requests(&request, &provider).await.unwrap();
+    let result = fetch_pull_requests(&request.query, &provider)
+        .await
+        .unwrap();
 
     // Verify that no executable actions are generated since PR 131 already has lgtm
     assert_eq!(
@@ -2989,7 +3003,7 @@ async fn test_output_selection_without_actions() {
     let provider = MockHub::new(mock_data);
 
     // Test case: No actions requested - should display table
-    let (request, _display_mode) = build_request_from_args(vec![
+    let request = build_request_from_args(vec![
         "autoprat",
         "--repo",
         "owner/repo", // No action flags
@@ -2997,13 +3011,15 @@ async fn test_output_selection_without_actions() {
     .unwrap();
 
     // Check has_actions before consuming the request
-    let should_output_commands = request.has_actions();
+    let should_output_commands = request.query.action_policy.has_actions();
     assert!(
         !should_output_commands,
         "Request should indicate no actions were requested"
     );
 
-    let result = fetch_pull_requests(&request, &provider).await.unwrap();
+    let result = fetch_pull_requests(&request.query, &provider)
+        .await
+        .unwrap();
 
     // Verify no executable actions are generated
     assert_eq!(
@@ -3025,7 +3041,7 @@ async fn test_output_selection_with_custom_comments() {
     let provider = MockHub::new(mock_data);
 
     // Test case: Custom comments requested - should output commands
-    let (request, _display_mode) = build_request_from_args(vec![
+    let request = build_request_from_args(vec![
         "autoprat",
         "--repo",
         "owner/repo",
@@ -3035,17 +3051,19 @@ async fn test_output_selection_with_custom_comments() {
     .unwrap();
 
     // Check has_actions before consuming the request
-    let should_output_commands = request.has_actions();
+    let should_output_commands = request.query.action_policy.has_actions();
     assert!(
         should_output_commands,
         "Request should indicate actions were requested (custom comments)"
     );
 
-    let result = fetch_pull_requests(&request, &provider).await.unwrap();
+    let result = fetch_pull_requests(&request.query, &provider)
+        .await
+        .unwrap();
 
     // Verify that executable actions are generated for custom comments
     assert!(
-        result.executable_actions.len() > 0,
+        !result.executable_actions.is_empty(),
         "Should have executable actions for custom comments"
     );
 
@@ -3062,7 +3080,7 @@ async fn test_output_selection_with_mixed_actions() {
     let provider = MockHub::new(mock_data);
 
     // Test case: Mix of built-in actions and custom comments
-    let (request, _display_mode) = build_request_from_args(vec![
+    let request = build_request_from_args(vec![
         "autoprat",
         "--repo",
         "owner/repo",
@@ -3074,17 +3092,19 @@ async fn test_output_selection_with_mixed_actions() {
     .unwrap();
 
     // Check has_actions before consuming the request
-    let should_output_commands = request.has_actions();
+    let should_output_commands = request.query.action_policy.has_actions();
     assert!(
         should_output_commands,
         "Request should indicate actions were requested"
     );
 
-    let result = fetch_pull_requests(&request, &provider).await.unwrap();
+    let result = fetch_pull_requests(&request.query, &provider)
+        .await
+        .unwrap();
 
     // Verify that executable actions are generated
     assert!(
-        result.executable_actions.len() > 0,
+        !result.executable_actions.is_empty(),
         "Should have executable actions"
     );
 
@@ -3102,7 +3122,7 @@ async fn test_output_selection_actions_with_empty_filtered_prs() {
 
     // Test case: Actions requested but filtering produces no PRs
     // This is the critical case - should output empty commands, not table
-    let (request, _display_mode) = build_request_from_args(vec![
+    let request = build_request_from_args(vec![
         "autoprat",
         "--repo",
         "owner/repo",
@@ -3113,13 +3133,15 @@ async fn test_output_selection_actions_with_empty_filtered_prs() {
     .unwrap();
 
     // Check has_actions before consuming the request
-    let should_output_commands = request.has_actions();
+    let should_output_commands = request.query.action_policy.has_actions();
     assert!(
         should_output_commands,
         "Request should indicate actions were requested"
     );
 
-    let result = fetch_pull_requests(&request, &provider).await.unwrap();
+    let result = fetch_pull_requests(&request.query, &provider)
+        .await
+        .unwrap();
 
     // This is the critical test: filtering produces no PRs
     assert_eq!(
@@ -3425,10 +3447,9 @@ async fn test_multi_repository_urls_with_actions() {
 
     // Verify the action is for the correct PR (acme PR that needs approval)
     let action = &result.executable_actions[0];
-    assert_eq!(action.action.name(), "approve");
     assert_eq!(action.pr_info.repo.to_string(), "acme/web-app");
     assert_eq!(action.pr_info.number, 100);
-    assert_eq!(action.action.get_comment_body(), Some("/approve"));
+    assert_eq!(action.action, PrAction::comment(CommentAction::Approve));
 }
 
 #[tokio::test]
@@ -3929,8 +3950,7 @@ async fn test_action_hold() {
 
     // All actions should be "hold" comment actions
     for action in &result.executable_actions {
-        assert_eq!(action.action.name(), "hold");
-        assert_eq!(action.action.get_comment_body(), Some("/hold"));
+        assert_eq!(action.action, PrAction::comment(CommentAction::Hold));
     }
 }
 
@@ -4007,9 +4027,9 @@ fn test_hold_slash_command() {
         parse_args_and_create_request_from(vec!["autoprat", "--repo", "owner/repo", "/hold"]);
     assert!(result.is_ok());
 
-    let (request, _) = result.unwrap();
-    assert_eq!(request.actions.len(), 1);
-    assert_eq!(request.actions[0].name(), "hold");
+    let request = result.unwrap();
+    assert_eq!(request.query.action_policy.actions.len(), 1);
+    assert_eq!(request.query.action_policy.actions[0].name(), "hold");
 }
 
 #[test]
@@ -4019,9 +4039,9 @@ fn test_hold_action_parses() {
         parse_args_and_create_request_from(vec!["autoprat", "--repo", "owner/repo", "--hold"]);
     assert!(result.is_ok());
 
-    let (request, _) = result.unwrap();
-    assert_eq!(request.actions.len(), 1);
-    assert_eq!(request.actions[0].name(), "hold");
+    let request = result.unwrap();
+    assert_eq!(request.query.action_policy.actions.len(), 1);
+    assert_eq!(request.query.action_policy.actions[0].name(), "hold");
 }
 
 #[tokio::test]
@@ -4038,11 +4058,20 @@ async fn test_action_hold_grouped_with_other_comments() {
     assert!(result.is_ok());
 
     let result = result.unwrap();
-    // Should have grouped-comment actions
+    // Approved PRs only need hold; unapproved PRs need the grouped hold+approve action.
     assert!(!result.executable_actions.is_empty());
-    for action in &result.executable_actions {
-        assert_eq!(action.action.name(), "grouped-comment");
-    }
+    let hold_only = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.action == PrAction::comment(CommentAction::Hold))
+        .count();
+    let grouped = result
+        .executable_actions
+        .iter()
+        .filter(|action| action.action.name() == "grouped-comment")
+        .count();
+    assert_eq!(hold_only, 2);
+    assert_eq!(grouped, 7);
 }
 
 /// Builds a PR fixture with the given commit count, otherwise identical to a

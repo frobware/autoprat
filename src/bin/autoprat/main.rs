@@ -62,7 +62,7 @@ async fn main() {
 async fn run() -> anyhow::Result<()> {
     init_tracing();
 
-    let (request, display_mode) = match parse_args(std::env::args()) {
+    let request = match parse_args(std::env::args()) {
         Ok(result) => result,
         Err(err) => {
             if let Some(clap_err) = err.downcast_ref::<clap::Error>() {
@@ -73,16 +73,16 @@ async fn run() -> anyhow::Result<()> {
         }
     };
 
-    let result = fetch_pull_requests(&request, &GitHub).await?;
+    let result = fetch_pull_requests(&request.query, &GitHub).await?;
     let mut stdout = std::io::stdout();
 
-    if request.has_actions() {
+    if request.query.action_policy.has_actions() {
         output_shell_commands(&result.executable_actions, &mut stdout)?;
     } else {
         display_pr_table(
             &result.filtered_prs,
-            &display_mode,
-            request.truncate_titles,
+            &request.display.mode,
+            request.display.truncate_titles,
             should_use_tty_output(),
             &mut stdout,
         )

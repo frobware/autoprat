@@ -2,8 +2,8 @@ use std::{collections::HashMap, io::Write, time::Duration};
 
 use anyhow::Result;
 use autoprat::{
-    Action, CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, DisplayMode,
-    PullRequest, Task,
+    CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, DisplayMode, PullRequest,
+    Task,
 };
 #[cfg(test)]
 use autoprat::{CheckUrl, Repo};
@@ -188,10 +188,6 @@ fn format_ci_status(status: &CiStatus) -> String {
         CiStatusType::Unknown => "Unknown".to_string(),
         CiStatusType::Pending => unreachable!("Pending status with no pending checks"),
     }
-}
-
-fn format_shell_command(action: &dyn Action, pr_info: &PullRequest) -> String {
-    action.format_shell_command(pr_info)
 }
 
 fn format_relative_time(time: DateTime<Utc>) -> String {
@@ -815,7 +811,7 @@ fn display_checks_tree<W: Write>(
 pub fn output_shell_commands<W: Write>(actions: &[Task], writer: &mut W) -> Result<()> {
     for action in actions {
         let pr = &action.pr_info;
-        let command = format_shell_command(action.action.as_ref(), &action.pr_info);
+        let command = autoprat::shell::format_shell_command(&action.action, &action.pr_info);
         writeln!(writer, "{command} # [{}] {}", pr.base_branch, pr.title)?;
     }
     Ok(())
@@ -1023,12 +1019,12 @@ mod tests {
 
     #[test]
     fn test_output_shell_commands_emits_trailing_comment() {
-        use autoprat::cli::CommentAction;
+        use autoprat::{CommentAction, PrAction};
 
         let pr = create_test_pr_data().pop().unwrap();
         let tasks = vec![Task {
             pr_info: pr,
-            action: Box::new(CommentAction::new("hello")),
+            action: PrAction::comment(CommentAction::Custom("hello".to_string())),
         }];
 
         let mut output = Vec::new();
