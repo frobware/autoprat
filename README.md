@@ -1,403 +1,277 @@
 # autoprat
 
-**Stop clicking through GitHub PRs one by one.**
+`autoprat` finds GitHub pull requests and, when asked to act, prints the `gh` commands to do it.
 
-autoprat finds the PRs you care about and generates the commands to act on them in bulk.
+It is for maintainers who already live in GitHub, Prow-style slash commands, bot PRs, CI labels, and bulk triage.
 
-## The Problem
+**autoprat never changes a pull request itself.** It only queries GitHub and writes output to stdout. With action flags, that output is `gh` commands. Nothing is approved, held, closed, merged, or commented on until you run those commands yourself -- usually by piping them to `sh` after reading them. Reviewing the output before running it is the point of the tool.
 
-You maintain a busy repository. Every day you need to:
-- Approve PRs from trusted contributors like Dependabot
-- Give `/ok-to-test` to PRs that need it
-- Comment on failing PRs to restart CI
-- Hold PRs during a freeze, merge the ones that are ready
-- Find PRs missing reviews
+## Install
 
-Opening each PR in a browser tab gets old fast.
+Prerequisites:
 
-## The Solution
+- `gh` installed and authenticated
+- Rust, if installing from source
 
 ```bash
-# Find PRs that need approval.
-autoprat -r owner/repo --needs-approve
-
-# Generate approval commands for Dependabot PRs.
-autoprat -r owner/repo --author dependabot --approve
-gh pr comment 123 --repo owner/repo --body "/approve"
-gh pr comment 456 --repo owner/repo --body "/approve"
-
-# Execute those commands.
-autoprat -r owner/repo --author dependabot --approve | sh
+cargo install --git https://github.com/frobware/autoprat.git
 ```
 
-autoprat queries GitHub once, applies your filters, and outputs standard `gh` commands you can review before running.
-
-**Prow users:** actions accept the same slash syntax you already use in PR comments. `autoprat -r repo /hold` is equivalent to `autoprat -r repo --hold` — same for `/approve`, `/lgtm`, `/ok-to-test`, `/close`, `/merge`, and `/retest`.
-
-## Quick Start
+From a checkout:
 
 ```bash
-# Install.
-cargo install --git https://github.com/frobware/autoprat.git
+cargo build --release
+```
 
-# See what needs your attention.
-autoprat -r your-org/your-repo --needs-approve --needs-lgtm
+Use `autoprat --help` for the current flag list.
 
-# Focus on specific PRs by number, inclusive range, or URL.
-autoprat -r your-org/your-repo --detailed 123 456
-autoprat -r your-org/your-repo --detailed 123-127 200
-autoprat --detailed https://github.com/your-org/your-repo/pull/123
+## Basic Use
 
-# Exclude specific PRs from processing.
-autoprat -r your-org/your-repo --needs-approve --exclude 123,456 --approve
-autoprat -r your-org/your-repo --exclude https://github.com/your-org/your-repo/pull/789 --lgtm
+List matching PRs:
 
-# Query multiple repositories with the same filters.
-autoprat -r your-org/repo1 -r your-org/repo2 --failing-ci
+```bash
+autoprat -r org/repo --needs-approve
+autoprat -r org/repo --failing-ci
+autoprat -r org/repo --author dependabot
+```
 
-# Monitor specific PRs across multiple repositories.
-autoprat --detailed https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456
+Generate commands:
 
-# Approve trusted bot PRs.
-autoprat -r your-org/your-repo --author dependabot --approve | sh
+```bash
+autoprat -r org/repo --author dependabot --approve
+```
 
-# Handle PRs needing testing permission.
-autoprat -r your-org/your-repo --needs-ok-to-test --ok-to-test | sh
+Run them after reviewing:
+
+```bash
+autoprat -r org/repo --author dependabot --approve | sh
+```
+
+Prow-style action names work as positional slash commands too:
+
+```bash
+autoprat -r org/repo /approve
+autoprat -r org/repo /lgtm
+autoprat -r org/repo /ok-to-test
+autoprat -r org/repo /retest
+autoprat -r org/repo /hold
+```
+
+`/close` and `/merge` are accepted as well.
+
+## Selecting PRs
+
+Work from a repository:
+
+```bash
+autoprat -r org/repo --needs-lgtm
+autoprat -r org/repo --needs-approve --author alice
+```
+
+Target specific PRs:
+
+```bash
+autoprat -r org/repo 123 456
+autoprat -r org/repo 123-127
+autoprat https://github.com/org/repo/pull/123
+```
+
+Ranges are inclusive. `123-127` means `123 124 125 126 127`. Add `-d` for the detailed view of the selected PRs.
+
+Exclude PRs from a wider selection:
+
+```bash
+autoprat -r org/repo --needs-approve --exclude 123,456 --approve
+autoprat -r org/repo --needs-lgtm --exclude 120-130 --lgtm
+autoprat -r org/repo --exclude https://github.com/org/repo/pull/789 --hold
+```
+
+Search multiple repositories:
+
+```bash
+autoprat -r org/backend -r org/frontend --failing-ci
+autoprat -r org/repo1 -r org/repo2 --author dependabot --approve
+```
+
+Or use PR URLs when the selection spans repositories:
+
+```bash
+autoprat \
+  https://github.com/org/backend/pull/123 \
+  https://github.com/org/frontend/pull/456
 ```
 
 ## Common Workflows
 
-### Daily Maintenance
+Approve trusted bot PRs:
+
 ```bash
-# What needs my attention today?
-autoprat -r myorg/myrepo --needs-approve --needs-lgtm
-
-# Bulk approve Dependabot PRs.
-autoprat -r myorg/myrepo --author dependabot --approve | sh
-
-# Give testing permission to community PRs.
-autoprat -r myorg/myrepo --needs-ok-to-test --ok-to-test | sh
+autoprat -r org/repo --author dependabot --approve
+autoprat -r org/repo --author dependabot --approve | sh
 ```
 
-### Holding and Merging
-```bash
-# Put a hold on all PRs touching the API while you investigate.
-autoprat -r myorg/myrepo --title "(?i)api" --hold | sh
+Handle PRs waiting for test permission:
 
-# Merge approved Dependabot PRs.
-autoprat -r myorg/myrepo --author dependabot --label approved --label lgtm --merge | sh
+```bash
+autoprat -r org/repo --needs-ok-to-test
+autoprat -r org/repo --needs-ok-to-test --ok-to-test | sh
 ```
 
-### CI Firefighting
+Find PRs missing merge preconditions:
+
 ```bash
-# Find failing PRs.
-autoprat -r myorg/myrepo --failing-ci
+autoprat -r org/repo --needs-approve
+autoprat -r org/repo --needs-lgtm
+autoprat -r org/repo --needs-approve --needs-lgtm
+```
 
-# See detailed failure info with logs.
-autoprat -r myorg/myrepo --failing-ci --detailed-with-logs
+Retest failing PRs:
 
-# Comment on all failing PRs.
-autoprat -r myorg/myrepo --failing-ci --comment "Investigating CI failures" | sh
+```bash
+autoprat -r org/repo --failing-ci
+autoprat -r org/repo --failing-ci --retest | sh
+```
 
-# Retest failing PRs.
-autoprat -r myorg/myrepo --failing-ci --retest | sh
+Target one failing check:
 
-# Override specific failing check across multiple PRs.
-autoprat -r myorg/myrepo --failing-check "ci/test-flaky" \
+```bash
+autoprat -r org/repo --failing-check "ci/test-flaky"
+autoprat -r org/repo --failing-check "ci/test-flaky" \
   --comment "/override ci/test-flaky" | sh
-
-# Close stale PRs with failing CI, excluding specific ones.
-autoprat -r myorg/myrepo --failing-ci --author "external-contributor" \
-  --exclude 123,456 --close | sh
 ```
 
-### Advanced Filtering
-```bash
-# PRs from specific author that need LGTM.
-autoprat -r myorg/myrepo --needs-lgtm --author "dependabot"
-
-# PRs with "bump" in the title.
-autoprat -r myorg/myrepo --title "bump"
-
-# Case-insensitive title search.
-autoprat -r myorg/myrepo --title "(?i)breaking change"
-
-# High priority bugs without holds.
-autoprat -r myorg/myrepo --label "priority/high" --label "kind/bug" --label "-do-not-merge/hold"
-
-# PRs missing approval from specific author, excluding some.
-autoprat -r myorg/myrepo --author "trusted-contributor" --needs-approve --exclude 789
-
-# PRs targeting the main branch.
-autoprat -r myorg/myrepo --base main --needs-approve
-
-# PRs targeting a release branch.
-autoprat -r myorg/myrepo --base release-1.0 --approve | sh
-
-# PRs with more than one commit (often bot-generated rebase chains).
-autoprat -r myorg/myrepo --commits ">1"
-
-# PRs with exactly 1 commit, ready for bulk LGTM.
-autoprat -r myorg/myrepo --commits 1 --author trusted-bot --lgtm
-
-# Raw GitHub search queries for complex filtering.
-# Note: 'is:pr' and 'is:open' are automatically added if not present
-autoprat --query "repo:myorg/myrepo author:dependabot created:>2024-01-01"
-autoprat --query "repo:myorg/myrepo status:failure comments:>5"
-autoprat --query "repo:myorg/myrepo label:bug -label:wontfix updated:>2024-01-01"
-```
-
-### Multi-Repository Workflows
-```bash
-# Query multiple repositories with the same filters.
-autoprat -r myorg/backend -r myorg/frontend --failing-ci
-
-# Bulk approve Dependabot PRs across multiple repositories.
-autoprat -r myorg/repo1 -r myorg/repo2 -r myorg/repo3 \
-  --author dependabot --approve | sh
-
-# Monitor PRs needing approval across related repositories.
-autoprat -r myorg/backend -r myorg/frontend -r myorg/docs \
-  --needs-approve --needs-lgtm
-
-# Monitor related PRs across multiple repositories using URLs.
-autoprat --detailed \
-  https://github.com/myorg/backend/pull/123 \
-  https://github.com/myorg/frontend/pull/456
-
-# Apply filters across multiple repositories using URLs.
-autoprat --author dependabot --approve \
-  https://github.com/myorg/repo1/pull/123 \
-  https://github.com/myorg/repo2/pull/456
-```
-
-## How It Works
-
-**Workflow:** specify repository → apply filters → choose actions → select output format
-
-1. **Parallel API calls** fetch all open PRs from specified repositories with labels, CI status, and recent comments
-2. **Filter in memory** using your criteria (author, labels, CI status, etc.) applied globally across all repositories
-3. **Generate standard gh commands** that you can review before executing
-4. **Execute selectively** by piping to shell or running commands individually
-
-autoprat never executes commands itself - it only generates `gh pr comment` commands for you to review and run.
-
-## Understanding the Output
-
-### CI Status Column
-The CI column shows the current state of CI checks:
-
-**When checks are running:**
-- Shows detailed breakdown: `S:4 F:0 C:1 X:1 Q:2 (5/8)`
-  - `S:4` - 4 checks succeeded
-  - `F:0` - 0 checks failed
-  - `C:1` - 1 check cancelled
-  - `X:1` - 1 check in progress
-  - `Q:2` - 2 checks queued
-  - `P:0` - 0 checks pending (other pending states)
-  - `(5/8)` - 5 completed out of 8 total
-
-**When all checks complete:**
-- `Success` - All checks passed
-- `F:1 C:1` - 1 failed, 1 cancelled
-- `F:2 C:1 (3/5)` - 2 failed, 1 cancelled out of 5 total (with some successes)
-- `Failed: 2/5` - Some checks failed (no cancellations)
-
-**Note:** Merge prerequisite checks (like Prow's tide) are not counted as "pending" - look at the label columns (LGTM, APP) to understand merge blockers.
-
-## Smart Features
-
-### Idempotent Actions
-Built-in actions are smart and safe to run repeatedly:
-```bash
-# Safe to run multiple times - only acts when needed.
-autoprat -r myorg/myrepo --approve | sh
-```
-
-The conditional actions (`--approve`, `--lgtm`, `--ok-to-test`, `--hold`) check existing labels and only generate commands when appropriate, whilst `--close`, `--merge`, and `--retest` always execute when specified. Perfect for automation - no duplicate comments, no spam.
-
-### Commit Limit Guard
-Automated bots like Konflux or MintMaker often produce PRs with hundreds of commits (rebase chains, dependency upgrade trains). You almost never want to blindly `/lgtm` or `/approve` those. When an action is requested, autoprat refuses to emit any commands if any targeted PR has more than `--commit-limit` commits (default: `1`):
+Hold a set of PRs:
 
 ```bash
-$ autoprat -r myorg/myrepo --author red-hat-konflux /lgtm
-Error: 3 pull request(s) exceed --commit-limit=1 (no commands emitted):
-  https://github.com/myorg/myrepo/pull/1762 (529 commits)
-  https://github.com/myorg/myrepo/pull/1763 (534 commits)
-  https://github.com/myorg/myrepo/pull/1764 (534 commits)
-Re-run with --commit-limit <N> to raise the threshold, or --exclude the PR(s).
+autoprat -r org/repo --title "(?i)api" --hold
+autoprat -r org/repo --title "(?i)api" --hold | sh
 ```
 
-Raise the threshold when you want to proceed, or use `--exclude` to skip individual PRs:
+Merge PRs that already satisfy your labels:
+
 ```bash
-autoprat -r myorg/myrepo --author trusted-bot --lgtm --commit-limit 50 | sh
+autoprat -r org/repo --label approved --label lgtm --merge
 ```
 
-The guard only fires when an action is present. Listing and filtering are never blocked. Pair it with `--commits ">1"` to discover over-limit PRs before acting.
+Find bot PRs that are not single-commit updates:
 
-### Comment Throttling
-Prevent spam when running in loops:
 ```bash
-# Only post if same comment wasn't posted in last 30 minutes.
-autoprat -r myorg/myrepo --failing-ci \
-  --comment "Restarting CI" --throttle 30m | sh
-
-# Post multiple comments to each matching PR.
-autoprat -r myorg/myrepo --failing-ci \
-  --comment "Investigating failures" \
-  --comment "/retest" | sh
+autoprat -r org/repo --author red-hat-konflux --commits ">1"
+autoprat -r org/repo --author red-hat-konflux --commits 1 --lgtm
 ```
 
-### Intelligent Detailed Output
-Two levels of detail for different needs:
+Use a raw GitHub search query when the built-in filters are not enough:
 
-**Basic detailed (`-d`)** - Detailed PR tree view with URLs:
 ```bash
-# See PR status, labels, and CI check results.
-autoprat -r myorg/myrepo --detailed
-
-# Focus on failing PRs with full status tree.
-autoprat -r myorg/myrepo --failing-ci --detailed
+autoprat --query "repo:org/repo author:dependabot created:>2026-01-01"
+autoprat --query "repo:org/repo status:failure comments:>5"
 ```
 
-**Detailed with logs (`-D`)** - Same as `-d` plus automatic error log extraction:
+`is:pr` and `is:open` are added to raw queries when you do not specify them.
+
+## Safety
+
+autoprat never acts on a PR itself; in action mode it only prints the `gh` commands, and piping to `sh` is the only step that changes anything, so nothing happens to a PR until you choose to run the output. The normal workflow is to look before you run:
+
 ```bash
-# See WHY CI checks are failing without clicking URLs.
-autoprat -r myorg/myrepo --failing-ci --detailed-with-logs
+# 1. Inspect the matching PRs.
+autoprat -r org/repo --needs-approve
 
-# Get immediate failure insights for triage.
-autoprat -r myorg/myrepo --detailed-with-logs
+# 2. Inspect the commands.
+autoprat -r org/repo --needs-approve --approve
+
+# 3. Run them.
+autoprat -r org/repo --needs-approve --approve | sh
 ```
 
+Built-in comment actions avoid obvious duplicates:
 
-### Safety First
-Always review before executing:
+- `--approve` only comments when the PR does not already have `approved`
+- `--lgtm` only comments when the PR does not already have `lgtm`
+- `--ok-to-test` only comments when the PR has `needs-ok-to-test`
+- `--hold` only comments when the PR does not already have `do-not-merge/hold`
+
+`--close`, `--merge`, `--retest`, and custom `--comment` actions are direct requests.
+
+`--throttle` suppresses a comment if the same body was posted recently:
+
 ```bash
-# 1. See what would happen.
-autoprat -r myorg/myrepo --needs-approve --approve
-
-# 2. Execute if satisfied.
-autoprat -r myorg/myrepo --needs-approve --approve | sh
+autoprat -r org/repo --failing-ci --comment "/retest" --throttle 30m | sh
 ```
 
-## All Options
+The commit limit guard stops you acting blindly on a bot PR that carries more commits than you would expect. When an action is requested, autoprat refuses to emit commands if any targeted PR has more commits than `--commit-limit` allows. The default is `1`: routine bot updates (Dependabot, Konflux, and the like) are almost always a single commit, so a targeted PR with more is unusual and worth a look before you act on it.
 
-### Repository
-- `-r, --repo <REPO>` - GitHub repository in format 'owner/repo' (can specify multiple to query across repositories)
-
-### Positional Arguments
-- `[PRS]...` - Focus on specific PRs by number, inclusive range (e.g. `123-127`), or URL (can specify multiple)
-  - Numbers: `123 456` (requires `--repo`)
-  - URLs: `https://github.com/owner/repo/pull/123`
-  - Mixed: `123 https://github.com/owner/repo/pull/456` (requires `--repo` for numeric args)
-  - Multi-repo: `https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456`
-
-### Exclusions
-- `-E, --exclude <PR>` - Exclude specific PRs from processing (can specify multiple or comma-separated)
-  - Numbers: `--exclude 123,456` (requires `--repo`)
-  - Inclusive ranges: `--exclude 124-126` (requires `--repo`)
-  - URLs: `--exclude https://github.com/owner/repo/pull/123`
-  - Mixed: `--exclude 123 --exclude https://github.com/owner/repo/pull/456`
-  - Spaces friendly: `--exclude "123, 456"` (automatically trimmed)
-  - Empty values ignored: `--exclude ""` or `--exclude "123,,"` (trailing commas OK)
-
-### Filters (combine with AND logic)
-- `-a, --author <AUTHOR>` - Exact author match
-- `--label <LABEL>` - Has label (prefix `-` to negate, can specify multiple)
-- `--failing-ci` - Has failing CI checks
-- `--failing-check <FAILING_CHECK>` - Specific CI check is failing (exact match)
-- `--needs-approve` - Missing 'approved' label
-- `--needs-lgtm` - Missing 'lgtm' label
-- `--needs-ok-to-test` - Has 'needs-ok-to-test' label
-- `--base <BRANCH>` - Filter by base/target branch (exact match)
-- `--title <PATTERN>` - Filter by PR title (regex, e.g. `"(?i)fix"`, `"dashboard|auth"`; plain substrings work too)
-- `--commits <EXPR>` - Filter by commit count; bare number for exact match or prefix with a comparison operator (`=N`, `!=N`, `>N`, `>=N`, `<N`, `<=N`, e.g. `">1"`, `"<=3"`)
-- `--query <QUERY>` - Raw GitHub search query (automatically adds `is:pr` and `is:open` if not present, mutually exclusive with all other filters and repository specification)
-
-### Actions
-- `--approve` - Generate `/approve` comments
-- `--lgtm` - Generate `/lgtm` comments
-- `--ok-to-test` - Generate `/ok-to-test` comments
-- `--hold` - Generate `/hold` comments
-- `--close` - Close PRs
-- `--merge` - Merge PRs
-- `--retest` - Generate `/retest` comments
-- `--comment <COMMENT>` - Generate custom comment commands (can specify multiple)
-- `--throttle <THROTTLE>` - Skip if same comment posted recently (e.g. `5m`, `1h`)
-
-All actions also accept Prow-style slash syntax (`/hold`, `/approve`, etc.) — see note above.
-
-### Safety
-- `--commit-limit <NUM>` - Abort with an error (no commands emitted) when any PR targeted by an action has more than this many commits [default: 1]. See [Commit Limit Guard](#commit-limit-guard).
-
-### Output
-- `-d, --detailed` - Show detailed PR information
-- `-D, --detailed-with-logs` - Show detailed PR information with error logs from failing checks
-- `-q, --quiet` - Print PR numbers only
-- `-L, --limit <LIMIT>` - Limit the number of PRs to process [default: 30]
-- `-S, --chop-long-lines` - Chop long lines at terminal width (like `less -S`)
-
-**When to use `-S`:** By default, autoprat outputs full lines which may wrap on narrow terminals. The `-S` flag chops lines at the terminal width. Width is determined in priority order: `COLUMNS` environment variable (if set), terminal size detection, or `/dev/tty` query (for redirected output like `watch`). Override the detected width with `COLUMNS=120 autoprat -S`.
-
-**Piped output:** When stdout is not a terminal (you piped autoprat into another command, redirected to a file, or captured in `$(...)`), the default table is replaced with a tab-separated form: no header row, no separator line, boolean columns rendered as `1`/`0` instead of checkmarks, and `CREATED AT` rendered as an RFC3339 timestamp instead of the humanised "2 hours ago". The column order matches the table. Scripts can split on tab and parse the timestamp directly. To force the human-readable table even when piping (for example into `less -R`), set `AUTOPRAT_FORCE_TTY=1`. The `-q/--quiet`, `-d/--detailed`, and `-D/--detailed-with-logs` modes are unaffected -- they already produce a stable shape.
-
-### Debugging
-Use the `RUST_LOG` environment variable for granular tracing:
 ```bash
-# GitHub API operations only
-RUST_LOG=autoprat::github=debug autoprat -r repo
-
-# Error pattern matching and log analysis only
-RUST_LOG=autoprat::log_fetcher=debug autoprat -r repo -D
-
-# Rate limiting and API quota tracking only
-RUST_LOG=autoprat::rate_limit=debug autoprat -r repo
-
-# All autoprat debugging
-RUST_LOG=autoprat=debug autoprat -r repo -D
-
-# Multiple categories
-RUST_LOG=autoprat::github=debug,autoprat::rate_limit=debug autoprat -r repo
+autoprat -r org/repo --author red-hat-konflux --commits ">1"
+autoprat -r org/repo --author red-hat-konflux --lgtm --commit-limit 50 | sh
 ```
 
-### Other
-- `-h, --help` - Print help
-- `-V, --version` - Print version
+Use `--exclude` to skip individual PRs instead of raising the limit for everything.
 
-## Installation
+## Output
 
-### Prerequisites
-- [GitHub CLI (`gh`)](https://cli.github.com/) installed and authenticated
-- Rust 1.76+ (if building from source)
-- Rust 1.89+ (if running clippy locally to match CI)
+Without action flags, autoprat prints matching PRs.
 
-### Install
+Useful views:
+
 ```bash
-# Install directly from Git (like go install).
-cargo install --git https://github.com/frobware/autoprat.git
-
-# Or build from source.
-git clone https://github.com/frobware/autoprat.git
-cd autoprat
-cargo build --release
-
-# The binary will be at target/release/autoprat
-# You can copy it to your PATH:
-cp target/release/autoprat ~/.local/bin/autoprat
+autoprat -r org/repo --failing-ci
+autoprat -r org/repo --failing-ci -d
+autoprat -r org/repo --failing-ci -D
+autoprat -r org/repo --quiet
 ```
 
-## Tips
+`-d` shows a detailed PR tree. `-D` also tries to fetch error logs for failing checks. `--quiet` prints PR numbers only.
 
-1. **Start with filters** - Run without action flags to see which PRs match
-2. **Review before executing** - Always check generated commands first
-3. **Focus on specific PRs** - Add PR numbers, inclusive ranges, or URLs as arguments: `autoprat -r repo -d 123 456`, `autoprat -r repo -d 123-127`, or `autoprat -d https://github.com/owner/repo/pull/123`
-   **Multi-repository** - Monitor PRs across repositories: `autoprat -d https://github.com/org/repo1/pull/123 https://github.com/org/repo2/pull/456`
-4. **Exclude problematic PRs** - Use `--exclude` to skip specific PRs: `autoprat -r repo --approve --exclude 123,456`
-5. **Use throttling** - Prevent spam with `--throttle` in automated workflows
-6. **Combine filters** - Multiple filters use AND logic for precise targeting
-7. **Exact check names** - Use `--failing-check` with exact CI check names for safety
-8. **Script the common cases** - Save frequent filter combinations as shell aliases
-9. **Use with watch** - Monitor PRs continuously: `watch -n 180 "autoprat -r org/repo -S"` or across multiple repos: `watch -n 180 "autoprat -r org/repo1 -r org/repo2 --failing-ci -S"` (180s interval recommended to avoid rate limiting)
+When stdout is not a terminal, the default table becomes tab-separated output with no header. Boolean columns are `1`/`0`, and timestamps are RFC3339. Use this for scripts.
+
+```bash
+autoprat -r org/repo --needs-approve > prs.tsv
+```
+
+Set `AUTOPRAT_FORCE_TTY=1` if you want the human table while piping:
+
+```bash
+AUTOPRAT_FORCE_TTY=1 autoprat -r org/repo --failing-ci | less -R
+```
+
+Use `-S` when watching output in a narrow terminal:
+
+```bash
+watch -n 180 'autoprat -r org/repo --failing-ci -S'
+```
+
+## CI Status
+
+The CI column is compressed so it fits in a table.
+
+Examples:
+
+- `Success`: all checks passed
+- `Failed: 1/2`: one of two checks failed
+- `F:2 C:1 (3/5)`: two failed, one cancelled, five total
+- `S:4 F:0 X:1 Q:2 (4/7)`: four succeeded, one running, two queued
+- `Unknown`: no usable check state
+
+Prow merge-prerequisite states are not treated as active CI. Use the label columns to see `approved`, `lgtm`, `needs-ok-to-test`, and hold state.
+
+## Debugging
+
+Tracing uses `RUST_LOG`:
+
+```bash
+RUST_LOG=autoprat=debug autoprat -r org/repo -D
+RUST_LOG=autoprat::github=debug autoprat -r org/repo
+RUST_LOG=autoprat::log_fetcher=debug autoprat -r org/repo -D
+```
+
+## Development
+
+```bash
+cargo fmt --check
+cargo test
+cargo clippy --all-targets -- -D warnings
+```
 
 ## License
 
