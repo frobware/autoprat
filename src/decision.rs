@@ -214,6 +214,25 @@ mod tests {
         }
     }
 
+    fn pr_with_state(
+        number: u64,
+        labels: &[&str],
+        recent_comments: Vec<CommentInfo>,
+    ) -> PullRequest {
+        let mut pr = pr_with_comments(recent_comments);
+        pr.number = number;
+        pr.url = format!("https://github.com/owner/repo/pull/{number}");
+        pr.labels = labels.iter().map(|label| label.to_string()).collect();
+        pr
+    }
+
+    fn planned_actions(tasks: &[Task]) -> Vec<(u64, PrAction)> {
+        tasks
+            .iter()
+            .map(|task| (task.pr_info.number, task.action.clone()))
+            .collect()
+    }
+
     #[test]
     fn grouped_comment_prunes_history_suppressed_sub_actions() {
         let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
@@ -309,6 +328,61 @@ mod tests {
 
         pr.labels.push("lgtm".to_string());
         assert!(!pull_request_matches(&pr, &fetch, &selection));
+    }
+
+    #[test]
+    fn generate_executable_actions_plans_core_behaviour_without_edges() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
+        let policy = ActionPolicy {
+            actions: vec![
+                PrAction::comments(vec![CommentAction::Approve, CommentAction::Lgtm]).unwrap(),
+                PrAction::comment(CommentAction::Custom("Needs attention".to_string())),
+                PrAction::Close,
+            ],
+            throttle: Some(Duration::from_secs(300)),
+            history_max_age: Duration::from_secs(3600),
+            history_max_comments: 10,
+            commit_limit: 1,
+        };
+        let prs = vec![
+            pr_with_state(1, &[], vec![]),
+            pr_with_state(
+                2,
+                &["approved"],
+                vec![CommentInfo {
+                    body: "Needs attention".to_string(),
+                    created_at: now - chrono::Duration::minutes(1),
+                }],
+            ),
+            pr_with_state(
+                3,
+                &["approved", "lgtm"],
+                vec![CommentInfo {
+                    body: "Needs attention".to_string(),
+                    created_at: now - chrono::Duration::minutes(1),
+                }],
+            ),
+        ];
+
+        let tasks = generate_executable_actions(&prs, &policy, now);
+
+        assert_eq!(
+            planned_actions(&tasks),
+            vec![
+                (
+                    1,
+                    PrAction::GroupedComment(vec![CommentAction::Approve, CommentAction::Lgtm])
+                ),
+                (
+                    1,
+                    PrAction::comment(CommentAction::Custom("Needs attention".to_string()))
+                ),
+                (1, PrAction::Close),
+                (2, PrAction::comment(CommentAction::Lgtm)),
+                (2, PrAction::Close),
+                (3, PrAction::Close),
+            ]
+        );
     }
 
     #[test]
