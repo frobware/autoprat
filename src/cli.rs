@@ -489,10 +489,95 @@ where
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
+
     use super::*;
 
     fn repos() -> Vec<Repo> {
         vec![Repo::new("openshift", "bpfman-operator").unwrap()]
+    }
+
+    #[test]
+    fn help_shows_public_flags_and_hides_internal_history_knobs() {
+        let help = CliArgs::command().render_long_help().to_string();
+
+        assert!(help.contains("--approve"));
+        assert!(help.contains("--ok-to-test"));
+        assert!(help.contains("--needs-approve"));
+        assert!(help.contains("--commits"));
+        assert!(help.contains("--exclude"));
+        assert!(!help.contains("--history-max-age"));
+        assert!(!help.contains("--history-max-comments"));
+    }
+
+    #[test]
+    fn parse_args_maps_action_flags_to_action_policy() {
+        let request = parse_args([
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--approve",
+            "--lgtm",
+            "--comment",
+            "Please review",
+            "--close",
+            "--merge",
+            "--throttle",
+            "5m",
+            "--history-max-age",
+            "30m",
+            "--history-max-comments",
+            "2",
+            "--commit-limit",
+            "3",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            request.query.action_policy.actions,
+            vec![
+                PrAction::GroupedComment(vec![
+                    CommentAction::Approve,
+                    CommentAction::Lgtm,
+                    CommentAction::Custom("Please review".to_string()),
+                ]),
+                PrAction::Close,
+                PrAction::Merge,
+            ]
+        );
+        assert_eq!(
+            request.query.action_policy.throttle,
+            Some(Duration::from_secs(5 * 60))
+        );
+        assert_eq!(
+            request.query.action_policy.history_max_age,
+            Duration::from_secs(30 * 60)
+        );
+        assert_eq!(request.query.action_policy.history_max_comments, 2);
+        assert_eq!(request.query.action_policy.commit_limit, 3);
+    }
+
+    #[test]
+    fn parse_args_maps_exclude_ranges_to_selection_policy() {
+        let request = parse_args([
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--exclude",
+            "1-3,5",
+            "10",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            request.query.selection.exclude,
+            vec![
+                PrIdentifier::new(Repo::new("owner", "repo").unwrap(), 1),
+                PrIdentifier::new(Repo::new("owner", "repo").unwrap(), 2),
+                PrIdentifier::new(Repo::new("owner", "repo").unwrap(), 3),
+                PrIdentifier::new(Repo::new("owner", "repo").unwrap(), 5),
+            ]
+        );
     }
 
     #[test]
