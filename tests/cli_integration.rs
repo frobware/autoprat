@@ -3,7 +3,8 @@ use async_trait::async_trait;
 use autoprat::{
     AppRequest, CheckConclusion, CheckInfo, CheckName, CheckState, CheckUrl, CommentAction,
     CommentInfo, DisplayMode, Forge, PrAction, PullRequest, QueryResult, Repo, fetch_pull_requests,
-    fetch_pull_requests_at, parse_args, search::FetchPlan,
+    fetch_pull_requests_at, parse_args,
+    search::{FetchPlan, RepoSearch},
 };
 use chrono::{TimeZone, Utc};
 
@@ -39,6 +40,12 @@ where
     T: Into<std::ffi::OsString> + Clone,
 {
     parse_args(args)
+}
+
+fn fetch_plan_from_args(raw_args: Vec<&str>) -> Result<FetchPlan> {
+    let request = build_request_from_args(raw_args)?;
+    FetchPlan::from_criteria(&request.query.fetch)
+        .ok_or_else(|| anyhow::anyhow!("expected fetch plan"))
 }
 
 /// Helper function to run autoprat with new API
@@ -83,6 +90,60 @@ fn behavioural_pr(number: u64, title: &str, recent_comments: Vec<CommentInfo>) -
         checks: vec![],
         recent_comments,
     }
+}
+
+#[test]
+fn test_cli_args_describe_specific_pr_fetch_plan() {
+    let plan = fetch_plan_from_args(vec!["autoprat", "--repo", "owner/repo", "123-125"]).unwrap();
+
+    assert_eq!(
+        plan,
+        FetchPlan::SpecificPullRequests(vec![
+            autoprat::PrIdentifier::new(test_repo(), 123),
+            autoprat::PrIdentifier::new(test_repo(), 124),
+            autoprat::PrIdentifier::new(test_repo(), 125),
+        ])
+    );
+}
+
+#[test]
+fn test_cli_args_describe_user_search_fetch_plan() {
+    let plan =
+        fetch_plan_from_args(vec!["autoprat", "--query", "author:alice", "--limit", "25"]).unwrap();
+
+    assert_eq!(
+        plan,
+        FetchPlan::UserSearch {
+            query: "author:alice is:pr is:open".to_string(),
+            limit: 25,
+        }
+    );
+}
+
+#[test]
+fn test_cli_args_describe_repository_search_fetch_plan() {
+    let plan = fetch_plan_from_args(vec![
+        "autoprat",
+        "--repo",
+        "owner/repo",
+        "--needs-approve",
+        "--label",
+        "bug",
+        "--label=-wip",
+        "--limit",
+        "40",
+    ])
+    .unwrap();
+
+    assert_eq!(
+        plan,
+        FetchPlan::RepositorySearches(vec![RepoSearch {
+            repo: test_repo(),
+            query: "repo:owner/repo -label:approved label:bug -label:wip type:pr state:open sort:created-asc"
+                .to_string(),
+            limit: 40,
+        }])
+    );
 }
 
 /// Helper to create mock GitHub data for testing
