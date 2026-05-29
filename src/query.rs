@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use crate::{
     decision::{commit_limit_offenders, generate_executable_actions, pull_request_matches},
@@ -15,6 +15,17 @@ pub async fn fetch_pull_requests<F>(request: &QuerySpec, forge: &F) -> anyhow::R
 where
     F: Forge + Sync,
 {
+    fetch_pull_requests_at(request, forge, Utc::now()).await
+}
+
+pub async fn fetch_pull_requests_at<F>(
+    request: &QuerySpec,
+    forge: &F,
+    now: DateTime<Utc>,
+) -> anyhow::Result<QueryResult>
+where
+    F: Forge + Sync,
+{
     let fetch_plan = FetchPlan::from_criteria(&request.fetch)
         .ok_or_else(|| anyhow::anyhow!("Query is required when not fetching specific PRs"))?;
     let all_prs = forge.fetch_pull_requests(&fetch_plan).await?;
@@ -25,7 +36,7 @@ where
         .collect();
 
     let executable_actions =
-        generate_executable_actions(&filtered_prs, &request.action_policy, Utc::now());
+        generate_executable_actions(&filtered_prs, &request.action_policy, now);
 
     enforce_commit_limit(&executable_actions, request.action_policy.commit_limit)?;
 
