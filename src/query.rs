@@ -69,3 +69,151 @@ fn enforce_commit_limit(tasks: &[Task], limit: u64) -> anyhow::Result<()> {
     );
     anyhow::bail!(msg)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Mutex, time::Duration};
+
+    use async_trait::async_trait;
+    use chrono::{TimeZone, Utc};
+
+    use super::*;
+    use crate::{
+        filters::{AuthorPost, NeedsLgtmSearch},
+        search::RepoSearch,
+        types::{ActionPolicy, CommentAction, FetchCriteria, PrAction, Repo, SelectionPolicy},
+    };
+
+    struct RecordingForge {
+        prs: Vec<PullRequest>,
+        seen_plan: Mutex<Option<FetchPlan>>,
+    }
+
+    impl RecordingForge {
+        fn new(prs: Vec<PullRequest>) -> Self {
+            Self {
+                prs,
+                seen_plan: Mutex::new(None),
+            }
+        }
+
+        fn seen_plan(&self) -> Option<FetchPlan> {
+            self.seen_plan.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl Forge for RecordingForge {
+        async fn fetch_pull_requests(&self, plan: &FetchPlan) -> anyhow::Result<Vec<PullRequest>> {
+            *self.seen_plan.lock().unwrap() = Some(plan.clone());
+            Ok(self.prs.clone())
+        }
+    }
+
+    fn repo() -> Repo {
+        Repo::new("owner", "repo").unwrap()
+    }
+
+    fn pr(number: u64, author: &str, labels: &[&str]) -> PullRequest {
+        PullRequest {
+            repo: repo(),
+            number,
+            title: format!("PR {number}"),
+            author_login: author.to_string(),
+            author_search_format: author.to_string(),
+            author_simple_name: author.to_string(),
+            url: format!("https://github.com/owner/repo/pull/{number}"),
+            labels: labels.iter().map(|label| label.to_string()).collect(),
+            created_at: Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap(),
+            base_branch: "main".to_string(),
+            commit_count: 1,
+            checks: vec![],
+            recent_comments: vec![],
+        }
+    }
+
+    fn request() -> QuerySpec {
+        QuerySpec {
+            fetch: FetchCriteria {
+                repos: vec![repo()],
+                prs: vec![],
+                query: None,
+                limit: 20,
+                search_filters: vec![Box::new(NeedsLgtmSearch)],
+            },
+            selection: SelectionPolicy {
+                exclude: vec![],
+                post_filters: vec![Box::new(AuthorPost::new().with_value("alice"))],
+            },
+            action_policy: ActionPolicy {
+                actions: vec![PrAction::comment(CommentAction::Lgtm), PrAction::Close],
+                throttle: None,
+                history_max_age: Duration::from_secs(3600),
+                history_max_comments: 10,
+                commit_limit: 10,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_pull_requests_at_passes_plan_to_forge_then_filters_and_plans() {
+        let forge = RecordingForge::new(vec![
+            pr(1, "alice", &[]),
+            pr(2, "bob", &[]),
+            pr(3, "alice", &["lgtm"]),
+        ]);
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
+
+        let result = fetch_pull_requests_at(&request(), &forge, now)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            forge.seen_plan(),
+            Some(FetchPlan::RepositorySearches(vec![RepoSearch {
+                repo: repo(),
+                query: "repo:owner/repo -label:lgtm type:pr state:open sort:created-asc"
+                    .to_string(),
+                limit: 20,
+            }]))
+        );
+        assert_eq!(
+            result
+                .filtered_prs
+                .iter()
+                .map(|pr| pr.number)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            result
+                .executable_actions
+                .iter()
+                .map(|task| (task.pr_info.number, task.action.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, PrAction::comment(CommentAction::Lgtm)),
+                (1, PrAction::Close),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_pull_requests_at_errors_before_forge_without_fetch_criteria() {
+        let mut request = request();
+        request.fetch.repos.clear();
+        request.fetch.search_filters.clear();
+        let forge = RecordingForge::new(vec![pr(1, "alice", &[])]);
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
+
+        let err = fetch_pull_requests_at(&request, &forge, now)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Query is required when not fetching specific PRs"
+        );
+        assert_eq!(forge.seen_plan(), None);
+    }
+}
