@@ -3,8 +3,8 @@ mod log_fetcher;
 
 use std::io::IsTerminal;
 
-use autoprat::{GitHub, fetch_pull_requests, parse_args};
-use display::{display_pr_table, output_shell_commands};
+use autoprat::{GitHub, fetch_pull_requests, parse_args, shell::write_shell_commands};
+use display::display_pr_table;
 
 /// Decide whether to format output for a human-readable terminal.
 ///
@@ -77,7 +77,7 @@ async fn run() -> anyhow::Result<()> {
     let mut stdout = std::io::stdout();
 
     if request.query.action_policy.has_actions() {
-        output_shell_commands(&result.executable_actions, &mut stdout)?;
+        write_shell_commands(&result.executable_actions, &mut stdout)?;
     } else {
         display_pr_table(
             &result.filtered_prs,

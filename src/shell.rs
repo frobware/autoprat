@@ -1,4 +1,8 @@
-use crate::types::{PrAction, PullRequest};
+use std::io::Write;
+
+use anyhow::Result;
+
+use crate::types::{PrAction, PullRequest, Task};
 
 pub fn format_shell_command(action: &PrAction, pr: &PullRequest) -> String {
     match action {
@@ -16,6 +20,19 @@ pub fn format_shell_command(action: &PrAction, pr: &PullRequest) -> String {
             format!("gh pr comment {} --body $'{body}'", pr.url)
         }
     }
+}
+
+pub fn format_shell_command_line(task: &Task) -> String {
+    let pr = &task.pr_info;
+    let command = format_shell_command(&task.action, pr);
+    format!("{command} # [{}] {}", pr.base_branch, pr.title)
+}
+
+pub fn write_shell_commands<W: Write>(actions: &[Task], writer: &mut W) -> Result<()> {
+    for action in actions {
+        writeln!(writer, "{}", format_shell_command_line(action))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -69,6 +86,22 @@ mod tests {
         assert_eq!(
             format_shell_command(&PrAction::Merge, &pr()),
             "gh pr merge --merge https://github.com/owner/repo/pull/123"
+        );
+    }
+
+    #[test]
+    fn writes_shell_commands_with_trailing_branch_and_title_comment() {
+        let tasks = vec![Task {
+            pr_info: pr(),
+            action: PrAction::comment(CommentAction::Custom("hello".to_string())),
+        }];
+        let mut output = Vec::new();
+
+        write_shell_commands(&tasks, &mut output).unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "gh pr comment https://github.com/owner/repo/pull/123 --body \"hello\" # [main] Test PR\n"
         );
     }
 }

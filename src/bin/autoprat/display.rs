@@ -3,7 +3,6 @@ use std::{collections::HashMap, io::Write, time::Duration};
 use anyhow::Result;
 use autoprat::{
     CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, DisplayMode, PullRequest,
-    Task,
 };
 #[cfg(test)]
 use autoprat::{CheckUrl, Repo};
@@ -808,15 +807,6 @@ fn display_checks_tree<W: Write>(
     Ok(())
 }
 
-pub fn output_shell_commands<W: Write>(actions: &[Task], writer: &mut W) -> Result<()> {
-    for action in actions {
-        let pr = &action.pr_info;
-        let command = autoprat::shell::format_shell_command(&action.action, &action.pr_info);
-        writeln!(writer, "{command} # [{}] {}", pr.base_branch, pr.title)?;
-    }
-    Ok(())
-}
-
 pub async fn display_pr_table<W: Write + Send>(
     prs: &[PullRequest],
     mode: &DisplayMode,
@@ -1015,35 +1005,6 @@ mod tests {
         assert!(result.contains("└─Checks"));
         assert!(result.contains("FAILURE"));
         assert!(result.contains("SUCCESS"));
-    }
-
-    #[test]
-    fn test_output_shell_commands_emits_trailing_comment() {
-        use autoprat::{CommentAction, PrAction};
-
-        let pr = create_test_pr_data().pop().unwrap();
-        let tasks = vec![Task {
-            pr_info: pr,
-            action: PrAction::comment(CommentAction::Custom("hello".to_string())),
-        }];
-
-        let mut output = Vec::new();
-        output_shell_commands(&tasks, &mut output).unwrap();
-
-        let result = String::from_utf8(output).unwrap();
-        let lines: Vec<&str> = result.lines().collect();
-        assert_eq!(
-            lines.len(),
-            1,
-            "expected single annotated command, got: {result:?}"
-        );
-        let line = lines[0];
-        assert!(line.starts_with("gh pr comment "));
-        assert!(line.contains("https://github.com/owner/repo/pull/101"));
-        assert!(
-            line.ends_with(" # [main] Add authentication system"),
-            "expected trailing branch/title comment, got: {line:?}"
-        );
     }
 
     #[tokio::test]
