@@ -18,7 +18,7 @@ pub mod types;
 pub use cli::parse_args;
 pub use github::GitHub;
 pub use pr_selector::{PrIdentifier, PrSelectorError};
-pub use query::fetch_pull_requests;
+pub use query::{fetch_pull_requests, fetch_pull_requests_at};
 pub use types::{
     ActionPolicy, AppRequest, CheckConclusion, CheckInfo, CheckName, CheckNameError,
     CheckRunStatus, CheckState, CheckUrl, CommentAction, CommentInfo, DisplayMode, DisplaySettings,

@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use autoprat::{
     AppRequest, CheckConclusion, CheckInfo, CheckName, CheckState, CheckUrl, CommentAction,
     CommentInfo, DisplayMode, Forge, PrAction, PullRequest, QueryResult, Repo, fetch_pull_requests,
-    parse_args, search::FetchPlan,
+    fetch_pull_requests_at, parse_args, search::FetchPlan,
 };
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 
 /// Build AppRequest from raw command-line arguments (for tests)
 /// This is the test-friendly interface that handles parsing internally
@@ -50,9 +50,39 @@ where
     fetch_pull_requests(&request.query, forge).await
 }
 
+async fn run_autoprat_test_at<F>(
+    raw_args: Vec<&str>,
+    forge: &F,
+    now: chrono::DateTime<Utc>,
+) -> anyhow::Result<QueryResult>
+where
+    F: Forge + Sync,
+{
+    let request = build_request_from_args(raw_args)?;
+    fetch_pull_requests_at(&request.query, forge, now).await
+}
+
 /// Helper to create a test repo
 fn test_repo() -> Repo {
     Repo::new("owner", "repo").unwrap()
+}
+
+fn behavioural_pr(number: u64, title: &str, recent_comments: Vec<CommentInfo>) -> PullRequest {
+    PullRequest {
+        repo: test_repo(),
+        number,
+        title: title.to_string(),
+        author_login: "alice".to_string(),
+        author_search_format: "alice".to_string(),
+        author_simple_name: "alice".to_string(),
+        url: format!("https://github.com/owner/repo/pull/{number}"),
+        labels: vec![],
+        created_at: Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap(),
+        base_branch: "main".to_string(),
+        commit_count: 1,
+        checks: vec![],
+        recent_comments,
+    }
 }
 
 /// Helper to create mock GitHub data for testing
@@ -2333,6 +2363,53 @@ async fn test_multiple_comments_with_throttling() {
         .filter(|action| action.action.name() == "grouped-comment")
         .count();
     assert_eq!(grouped_count, 8);
+}
+
+#[tokio::test]
+async fn test_fixed_clock_shell_output_for_throttled_grouped_comments() {
+    let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
+    let provider = MockHub::new(vec![
+        behavioural_pr(
+            201,
+            "Partial pruning",
+            vec![CommentInfo {
+                body: "Needs attention".to_string(),
+                created_at: now - chrono::Duration::minutes(45),
+            }],
+        ),
+        behavioural_pr(202, "Both comments", vec![]),
+    ]);
+
+    let result = run_autoprat_test_at(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--comment",
+            "Needs attention",
+            "--comment",
+            "Please review",
+            "--history-max-age",
+            "30m",
+            "--throttle",
+            "1h",
+        ],
+        &provider,
+        now,
+    )
+    .await
+    .unwrap();
+
+    let mut output = Vec::new();
+    autoprat::shell::write_shell_commands(&result.executable_actions, &mut output).unwrap();
+
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        concat!(
+            "gh pr comment https://github.com/owner/repo/pull/201 --body \"Please review\" # [main] Partial pruning\n",
+            "gh pr comment https://github.com/owner/repo/pull/202 --body $'Needs attention\\nPlease review' # [main] Both comments\n",
+        )
+    );
 }
 
 #[tokio::test]
