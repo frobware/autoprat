@@ -417,7 +417,6 @@ pub struct PullRequest {
     pub number: u64,
     pub title: String,
     pub author_login: String,
-    pub author_search_format: String,
     pub author_simple_name: String,
     pub url: String,
     pub labels: Vec<String>,
@@ -433,10 +432,9 @@ pub struct PullRequest {
 impl PullRequest {
     pub fn matches_author(&self, author: &str) -> bool {
         self.author_login == author
-            || self.author_search_format == author
+            || self.author_simple_name == author
             || (self.author_login.starts_with(&format!("{author}["))
                 && self.author_login.ends_with("]"))
-            || (self.author_search_format == format!("app/{author}"))
     }
 
     pub fn has_failing_ci(&self) -> bool {
@@ -458,14 +456,22 @@ impl PullRequest {
     }
 }
 
-/// Filter applied during GitHub search query construction.
-///
-/// Modifies the search query sent to GitHub to limit results server-side.
-/// The `matches` method is used after fetches as the local counterpart
-/// to the server-side query term.
-pub trait SearchFilter: std::fmt::Debug + Send + Sync {
-    fn apply(&self, terms: &mut Vec<String>);
-    fn matches(&self, pr: &PullRequest) -> bool;
+/// Forge-neutral criterion used both for server-side narrowing and local checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchCriterion {
+    MissingLabel(String),
+    PresentLabel(String),
+    BaseBranch(String),
+}
+
+impl SearchCriterion {
+    pub fn matches(&self, pr: &PullRequest) -> bool {
+        match self {
+            Self::MissingLabel(label) => !pr.has_label(label),
+            Self::PresentLabel(label) => pr.has_label(label),
+            Self::BaseBranch(branch) => pr.matches_base_branch(branch),
+        }
+    }
 }
 
 /// Filter applied after fetching pull requests.
@@ -572,7 +578,7 @@ pub struct FetchCriteria {
     pub prs: Vec<PrIdentifier>,
     pub query: Option<String>,
     pub limit: usize,
-    pub search_filters: Vec<Box<dyn SearchFilter + Send + Sync>>,
+    pub search_criteria: Vec<SearchCriterion>,
 }
 
 #[derive(Debug)]

@@ -5,15 +5,13 @@ use clap::{Args, Parser};
 
 use crate::{
     filters::{
-        AuthorPost, BaseBranchPost, BaseBranchSearch, CommitExpr, CommitsPost, FailingCheckPost,
-        FailingCiPost, LabelSearch, NeedsApproveSearch, NeedsLgtmSearch, NeedsOkToTestSearch,
+        AuthorPost, BaseBranchPost, CommitExpr, CommitsPost, FailingCheckPost, FailingCiPost,
         TitlePost,
     },
     pr_selector::{PrIdentifier, parse_pr_identifiers},
-    search::format_user_query,
     types::{
         ActionPolicy, AppRequest, CommentAction, DisplayMode, DisplaySettings, FetchCriteria,
-        PostFilter, PrAction, QuerySpec, Repo, SearchFilter, SelectionPolicy,
+        PostFilter, PrAction, QuerySpec, Repo, SearchCriterion, SelectionPolicy,
     },
 };
 
@@ -253,28 +251,30 @@ fn cli_to_actions(opts: &ActionArgs, custom_comments: &[String]) -> Vec<PrAction
     all_actions
 }
 
-fn cli_to_search_filters(filter_args: &FilterArgs) -> Vec<Box<dyn SearchFilter + Send + Sync>> {
-    let mut out: Vec<Box<dyn SearchFilter + Send + Sync>> = Vec::new();
+fn cli_to_search_criteria(filter_args: &FilterArgs) -> Vec<SearchCriterion> {
+    let mut out = Vec::new();
     if filter_args.needs_approve {
-        out.push(Box::new(NeedsApproveSearch));
+        out.push(SearchCriterion::MissingLabel("approved".to_string()));
     }
     if filter_args.needs_lgtm {
-        out.push(Box::new(NeedsLgtmSearch));
+        out.push(SearchCriterion::MissingLabel("lgtm".to_string()));
     }
     if filter_args.needs_ok_to_test {
-        out.push(Box::new(NeedsOkToTestSearch));
+        out.push(SearchCriterion::PresentLabel(
+            "needs-ok-to-test".to_string(),
+        ));
     }
 
-    if !filter_args.label.is_empty() {
-        out.push(Box::new(LabelSearch {
-            labels: filter_args.label.clone(),
-        }));
+    for label in &filter_args.label {
+        if let Some(label) = label.strip_prefix('-') {
+            out.push(SearchCriterion::MissingLabel(label.to_string()));
+        } else {
+            out.push(SearchCriterion::PresentLabel(label.clone()));
+        }
     }
 
     if let Some(branch) = &filter_args.base {
-        out.push(Box::new(BaseBranchSearch {
-            branch: branch.clone(),
-        }));
+        out.push(SearchCriterion::BaseBranch(branch.clone()));
     }
 
     out
@@ -405,7 +405,7 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
     let pr_identifiers = parse_pr_args_to_identifiers(&repos, &cli.prs)?;
     let exclude_identifiers = parse_pr_args_to_identifiers(&repos, &cli.exclude)?;
 
-    let query = cli.query.as_ref().map(|q| format_user_query(q));
+    let query = cli.query.clone();
 
     let throttle = cli
         .throttle
@@ -430,7 +430,7 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
             prs: pr_identifiers,
             query,
             limit: cli.limit,
-            search_filters: cli_to_search_filters(&cli.filters),
+            search_criteria: cli_to_search_criteria(&cli.filters),
         },
         selection: SelectionPolicy {
             exclude: exclude_identifiers,

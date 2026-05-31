@@ -242,14 +242,6 @@ pub(crate) struct GraphQLAuthor {
 }
 
 impl GraphQLAuthor {
-    pub(crate) fn search_format(&self) -> String {
-        if self.actor_type.is_bot() {
-            format!("app/{}", self.login)
-        } else {
-            self.login.clone()
-        }
-    }
-
     pub(crate) fn display_format(&self) -> String {
         if self.actor_type.is_bot() {
             format!("{}[bot]", self.login)
@@ -422,7 +414,6 @@ mod tests {
             login: "testuser".to_string(),
             actor_type: ActorType::User,
         };
-        assert_eq!(user_author.search_format(), "testuser");
         assert_eq!(user_author.display_format(), "testuser");
         assert_eq!(user_author.simple_name(), "testuser");
 
@@ -430,7 +421,6 @@ mod tests {
             login: "dependabot".to_string(),
             actor_type: ActorType::Bot,
         };
-        assert_eq!(bot_author.search_format(), "app/dependabot");
         assert_eq!(bot_author.display_format(), "dependabot[bot]");
         assert_eq!(bot_author.simple_name(), "dependabot");
     }

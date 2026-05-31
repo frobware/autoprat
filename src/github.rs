@@ -10,12 +10,15 @@
 
 mod convert;
 mod graphql;
+mod render;
+mod search;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use convert::{convert_graphql_pr_to_pr_info, convert_graphql_pr_to_pr_info_with_url_parsing};
 use graphql::{GraphQLQueryBuilder, GraphQLResponse};
 use octocrab::Octocrab;
+pub use render::GhCliRenderer;
 use serde::Deserialize;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -461,7 +464,8 @@ async fn fetch_github_data(plan: &FetchPlan) -> Result<Vec<PullRequest>> {
         }
         FetchPlan::UserSearch { query, limit } => {
             debug!("Using custom query");
-            fetch_prs_with_pagination(&octocrab, query, *limit, None).await
+            let search_query = search::format_user_query(query);
+            fetch_prs_with_pagination(&octocrab, &search_query, *limit, None).await
         }
         FetchPlan::RepositorySearches(searches) => {
             debug!("Fetching PRs from {} repo(s)", searches.len());
@@ -472,9 +476,10 @@ async fn fetch_github_data(plan: &FetchPlan) -> Result<Vec<PullRequest>> {
 
             let mut all_prs = Vec::new();
             for search in searches {
+                let search_query = search::build_repo_search_query(&search.repo, &search.criteria);
                 let prs = fetch_prs_with_pagination(
                     &octocrab,
-                    &search.query,
+                    &search_query,
                     search.limit,
                     Some(search.repo.clone()),
                 )
