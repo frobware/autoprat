@@ -293,12 +293,12 @@ async fn collect_specific_prs(
     for identifier in pr_identifiers {
         let repo = &identifier.repo;
         let number = identifier.number;
-        let search_query = format!("repo:{repo} type:pr {number}");
+        let search_query = search::build_specific_pr_search_query(repo, number);
 
         if let Some(pr_info) =
             fetch_single_pr_by_query(octocrab, &search_query, repo.clone()).await?
         {
-            if pr_info.number == number {
+            if is_requested_pr_number(&pr_info, number) {
                 all_prs.push(pr_info);
             } else {
                 warn!(
@@ -312,6 +312,26 @@ async fn collect_specific_prs(
 
     info!(found_count = all_prs.len(), "Collected specific PRs");
     Ok(all_prs)
+}
+
+fn is_requested_pr_number(pr: &PullRequest, requested: u64) -> bool {
+    pr.number == requested
+}
+
+fn take_until_limit(
+    page: impl IntoIterator<Item = PullRequest>,
+    already: usize,
+    limit: usize,
+) -> (Vec<PullRequest>, bool) {
+    let remaining = limit.saturating_sub(already);
+    if remaining == 0 {
+        return (Vec::new(), true);
+    }
+
+    let taken = page.into_iter().take(remaining).collect::<Vec<_>>();
+    let reached_limit = taken.len() == remaining;
+
+    (taken, reached_limit)
 }
 
 /// Fetches pull requests using paginated GraphQL search.
@@ -329,7 +349,6 @@ async fn fetch_prs_with_pagination(
     info!("Fetching PRs with pagination");
     let mut all_prs = Vec::with_capacity(limit.min(100)); // GitHub returns max 100 per page.
     let mut after_cursor: Option<String> = None;
-    let mut processed_count = 0;
     let mut page_count = 0;
 
     loop {
@@ -366,31 +385,36 @@ async fn fetch_prs_with_pagination(
             "Received PRs from GraphQL"
         );
 
-        for graphql_pr in search_results.nodes {
-            if processed_count >= limit {
-                info!(
-                    final_count = all_prs.len(),
-                    pages = page_count,
-                    "Reached limit"
-                );
-                return Ok(all_prs);
-            }
+        let page_prs = search_results
+            .nodes
+            .into_iter()
+            .filter_map(|graphql_pr| {
+                let pr_info = if let Some(ref repo) = repo {
+                    convert_graphql_pr_to_pr_info(graphql_pr, repo.clone())
+                } else {
+                    convert_graphql_pr_to_pr_info_with_url_parsing(graphql_pr)
+                };
 
-            let pr_info = if let Some(ref repo) = repo {
-                convert_graphql_pr_to_pr_info(graphql_pr, repo.clone())
-            } else {
-                convert_graphql_pr_to_pr_info_with_url_parsing(graphql_pr)
-            };
+                match pr_info {
+                    Ok(pr_info) => Some(pr_info),
+                    Err(e) => {
+                        warn!(error = %e, "Failed to convert GraphQL PR");
+                        None
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
 
-            match pr_info {
-                Ok(pr_info) => {
-                    all_prs.push(pr_info);
-                    processed_count += 1;
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to convert GraphQL PR");
-                }
-            }
+        let (page_prs, reached_limit) = take_until_limit(page_prs, all_prs.len(), limit);
+        all_prs.extend(page_prs);
+
+        if reached_limit {
+            info!(
+                final_count = all_prs.len(),
+                pages = page_count,
+                "Reached limit"
+            );
+            return Ok(all_prs);
         }
 
         if search_results.page_info.has_next_page {
@@ -518,5 +542,80 @@ pub struct GitHub;
 impl crate::types::Forge for GitHub {
     async fn fetch_pull_requests(&self, plan: &FetchPlan) -> Result<Vec<PullRequest>> {
         fetch_github_data(plan).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+
+    use super::*;
+
+    fn pr(number: u64) -> PullRequest {
+        PullRequest {
+            repo: Repo::new("owner", "repo").unwrap(),
+            number,
+            title: format!("PR {number}"),
+            author_login: "alice".to_string(),
+            author_simple_name: "alice".to_string(),
+            url: format!("https://github.com/owner/repo/pull/{number}"),
+            labels: vec![],
+            created_at: Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap(),
+            base_branch: "main".to_string(),
+            commit_count: 1,
+            checks: vec![],
+            recent_comments: vec![],
+        }
+    }
+
+    fn pr_numbers(prs: &[PullRequest]) -> Vec<u64> {
+        prs.iter().map(|pr| pr.number).collect()
+    }
+
+    #[test]
+    fn requested_pr_number_keeps_only_exact_matches() {
+        assert!(is_requested_pr_number(&pr(123), 123));
+        assert!(!is_requested_pr_number(&pr(124), 123));
+    }
+
+    #[test]
+    fn take_until_limit_keeps_only_remaining_budget() {
+        let (taken, reached_limit) =
+            take_until_limit(vec![pr(1), pr(2), pr(3), pr(4), pr(5)], 8, 10);
+
+        assert_eq!(pr_numbers(&taken), vec![1, 2]);
+        assert!(reached_limit);
+    }
+
+    #[test]
+    fn take_until_limit_reports_exact_limit() {
+        let (taken, reached_limit) = take_until_limit(vec![pr(1), pr(2)], 8, 10);
+
+        assert_eq!(pr_numbers(&taken), vec![1, 2]);
+        assert!(reached_limit);
+    }
+
+    #[test]
+    fn take_until_limit_reports_under_limit() {
+        let (taken, reached_limit) = take_until_limit(vec![pr(1)], 8, 10);
+
+        assert_eq!(pr_numbers(&taken), vec![1]);
+        assert!(!reached_limit);
+    }
+
+    #[test]
+    fn take_until_limit_handles_empty_pages() {
+        let (taken, reached_limit) = take_until_limit(Vec::new(), 8, 10);
+
+        assert!(taken.is_empty());
+        assert!(!reached_limit);
+    }
+
+    #[test]
+    fn take_until_limit_stops_when_already_at_limit() {
+        let (taken, reached_limit) = take_until_limit(vec![pr(1)], 10, 10);
+
+        assert!(taken.is_empty());
+        assert!(reached_limit);
     }
 }

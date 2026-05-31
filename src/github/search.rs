@@ -19,6 +19,10 @@ pub(crate) fn build_repo_search_query(repo: &Repo, criteria: &[SearchCriterion])
     parts.join(" ")
 }
 
+pub(crate) fn build_specific_pr_search_query(repo: &Repo, number: u64) -> String {
+    format!("repo:{repo} type:pr {number}")
+}
+
 pub(crate) fn format_user_query(query: &str) -> String {
     let mut final_query = query.to_string();
 
@@ -88,6 +92,14 @@ mod tests {
         assert_eq!(
             format_user_query("repo:o/r is:closed"),
             "repo:o/r is:closed is:pr"
+        );
+    }
+
+    #[test]
+    fn specific_pr_query_includes_repo_pr_type_and_number() {
+        assert_eq!(
+            build_specific_pr_search_query(&repo(), 123),
+            "repo:owner/repo type:pr 123"
         );
     }
 
