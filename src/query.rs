@@ -79,9 +79,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        filters::{AuthorPost, NeedsLgtmSearch},
+        filters::AuthorPost,
         search::RepoSearch,
-        types::{ActionPolicy, CommentAction, FetchCriteria, PrAction, Repo, SelectionPolicy},
+        types::{
+            ActionPolicy, CommentAction, FetchCriteria, PrAction, Repo, SearchCriterion,
+            SelectionPolicy,
+        },
     };
 
     struct RecordingForge {
@@ -120,7 +123,6 @@ mod tests {
             number,
             title: format!("PR {number}"),
             author_login: author.to_string(),
-            author_search_format: author.to_string(),
             author_simple_name: author.to_string(),
             url: format!("https://github.com/owner/repo/pull/{number}"),
             labels: labels.iter().map(|label| label.to_string()).collect(),
@@ -139,7 +141,7 @@ mod tests {
                 prs: vec![],
                 query: None,
                 limit: 20,
-                search_filters: vec![Box::new(NeedsLgtmSearch)],
+                search_criteria: vec![SearchCriterion::MissingLabel("lgtm".to_string())],
             },
             selection: SelectionPolicy {
                 exclude: vec![],
@@ -172,8 +174,7 @@ mod tests {
             forge.seen_plan(),
             Some(FetchPlan::RepositorySearches(vec![RepoSearch {
                 repo: repo(),
-                query: "repo:owner/repo -label:lgtm type:pr state:open sort:created-asc"
-                    .to_string(),
+                criteria: vec![SearchCriterion::MissingLabel("lgtm".to_string())],
                 limit: 20,
             }]))
         );
@@ -202,7 +203,7 @@ mod tests {
     async fn fetch_pull_requests_at_errors_before_forge_without_fetch_criteria() {
         let mut request = request();
         request.fetch.repos.clear();
-        request.fetch.search_filters.clear();
+        request.fetch.search_criteria.clear();
         let forge = RecordingForge::new(vec![pr(1, "alice", &[])]);
         let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
 

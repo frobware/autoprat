@@ -1,40 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::types::{PostFilter, PullRequest, SearchFilter};
-
-macro_rules! simple_search_filter {
-    ($vis:vis $ty:ident, $apply:expr, $matches:expr) => {
-        #[derive(Debug)]
-        $vis struct $ty;
-
-        impl SearchFilter for $ty {
-            fn apply(&self, terms: &mut Vec<String>) {
-                ($apply)(terms)
-            }
-
-            fn matches(&self, pr: &PullRequest) -> bool {
-                ($matches)(pr)
-            }
-        }
-    };
-}
-
-macro_rules! multi_search_filter {
-    ($vis:vis $ty:ident, $field:ident, $apply:expr, $matches:expr) => {
-        #[derive(Debug, Clone)]
-        $vis struct $ty {
-            pub $field: Vec<String>,
-        }
-        impl SearchFilter for $ty {
-            fn apply(&self, terms: &mut Vec<String>) {
-                ($apply)(&self.$field, terms)
-            }
-            fn matches(&self, pr: &PullRequest) -> bool {
-                ($matches)(&self.$field, pr)
-            }
-        }
-    };
-}
+use crate::types::{PostFilter, PullRequest};
 
 macro_rules! simple_post_filter {
     ($vis:vis $ty:ident, $pred:expr) => {
@@ -100,72 +66,43 @@ macro_rules! multi_post_filter {
     };
 }
 
-simple_search_filter!(
-    pub NeedsApproveSearch,
-    |terms: &mut Vec<String>| terms.push("-label:approved".into()),
-    |pr: &PullRequest| !pr.has_label("approved")
-);
-
-simple_search_filter!(
-    pub NeedsLgtmSearch,
-    |terms: &mut Vec<String>| terms.push("-label:lgtm".into()),
-    |pr: &PullRequest| !pr.has_label("lgtm")
-);
-
-simple_search_filter!(
-    pub NeedsOkToTestSearch,
-    |terms: &mut Vec<String>| terms.push("label:needs-ok-to-test".into()),
-    |pr: &PullRequest| pr.has_label("needs-ok-to-test")
-);
-
-multi_search_filter!(
-    pub LabelSearch,
-    labels,
-    |names: &[String], terms: &mut Vec<String>| {
-        for lbl in names {
-            if let Some(neg) = lbl.strip_prefix('-') {
-                terms.push(format!("-label:{neg}"));
-            } else {
-                terms.push(format!("label:{lbl}"));
-            }
-        }
-    },
-    |names: &[String], pr: &PullRequest| {
-        for lbl in names {
-            if let Some(neg) = lbl.strip_prefix('-') {
-                if pr.has_label(neg) {
-                    return false;
-                }
-            } else if !pr.has_label(lbl) {
-                return false;
-            }
-        }
-        true
-    }
-);
-
-#[derive(Debug)]
-pub struct BaseBranchSearch {
-    pub branch: String,
-}
-
-impl SearchFilter for BaseBranchSearch {
-    fn apply(&self, terms: &mut Vec<String>) {
-        terms.push(format!("base:{}", self.branch));
-    }
-
-    fn matches(&self, pr: &PullRequest) -> bool {
-        pr.matches_base_branch(&self.branch)
-    }
-}
-
 simple_post_filter!(pub FailingCiPost, |pr: &PullRequest| {
     pr.has_failing_ci()
 });
 
-single_post_filter!(pub AuthorPost, author, |pr: &PullRequest, name: &str| {
+#[derive(Debug, Clone, Default)]
+pub struct AuthorPost {
+    author: Option<String>,
+}
+
+impl AuthorPost {
+    pub const fn new() -> Self {
+        Self { author: None }
+    }
+
+    pub fn with_value(mut self, v: impl Into<String>) -> Self {
+        self.author = Some(v.into());
+        self
+    }
+}
+
+impl PostFilter for AuthorPost {
+    fn matches(&self, pr: &PullRequest) -> bool {
+        match self.author.as_deref() {
+            Some(name) => matches_author(pr, name),
+            None => true,
+        }
+    }
+}
+
+fn matches_author(pr: &PullRequest, name: &str) -> bool {
+    // TODO: Move forge-specific author identity aliases behind the forge adapter.
+    if let Some(app_name) = name.strip_prefix("app/") {
+        return pr.author_login == format!("{app_name}[bot]");
+    }
+
     pr.matches_author(name)
-});
+}
 
 multi_post_filter!(
     pub FailingCheckPost,
@@ -266,7 +203,6 @@ mod tests {
             number: 123,
             title: "Fix memory leak".to_string(),
             author_login: "alice".to_string(),
-            author_search_format: "alice".to_string(),
             author_simple_name: "alice".to_string(),
             url: "https://github.com/owner/repo/pull/123".to_string(),
             labels: labels.iter().map(|label| label.to_string()).collect(),
@@ -276,44 +212,6 @@ mod tests {
             checks: vec![],
             recent_comments: vec![],
         }
-    }
-
-    fn terms(filter: &dyn SearchFilter) -> Vec<String> {
-        let mut terms = Vec::new();
-        filter.apply(&mut terms);
-        terms
-    }
-
-    #[test]
-    fn needs_approve_search_term_matches_local_predicate() {
-        let filter = NeedsApproveSearch;
-
-        assert_eq!(terms(&filter), vec!["-label:approved"]);
-        assert!(filter.matches(&pr(&[], "main", 1)));
-        assert!(!filter.matches(&pr(&["approved"], "main", 1)));
-    }
-
-    #[test]
-    fn label_search_terms_match_local_predicate() {
-        let filter = LabelSearch {
-            labels: vec!["bug".to_string(), "-wip".to_string()],
-        };
-
-        assert_eq!(terms(&filter), vec!["label:bug", "-label:wip"]);
-        assert!(filter.matches(&pr(&["bug"], "main", 1)));
-        assert!(!filter.matches(&pr(&["bug", "wip"], "main", 1)));
-        assert!(!filter.matches(&pr(&["feature"], "main", 1)));
-    }
-
-    #[test]
-    fn base_branch_search_term_matches_local_predicate() {
-        let filter = BaseBranchSearch {
-            branch: "release-1.0".to_string(),
-        };
-
-        assert_eq!(terms(&filter), vec!["base:release-1.0"]);
-        assert!(filter.matches(&pr(&[], "release-1.0", 1)));
-        assert!(!filter.matches(&pr(&[], "main", 1)));
     }
 
     #[test]

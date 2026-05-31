@@ -128,11 +128,6 @@ pub(crate) fn convert_graphql_pr_to_pr_info(
             .as_ref()
             .map(|a| a.display_format())
             .unwrap_or_else(|| "Unknown".to_string()),
-        author_search_format: graphql_pr
-            .author
-            .as_ref()
-            .map(|a| a.search_format())
-            .unwrap_or_else(|| "Unknown".to_string()),
         author_simple_name: graphql_pr
             .author
             .map(|a| a.simple_name())
@@ -239,7 +234,6 @@ mod tests {
         assert_eq!(pr_info.number, 123);
         assert_eq!(pr_info.title, "Test PR");
         assert_eq!(pr_info.author_login, "testuser");
-        assert_eq!(pr_info.author_search_format, "testuser");
         assert_eq!(pr_info.author_simple_name, "testuser");
         assert_eq!(pr_info.url, "https://github.com/owner/repo/pull/123");
         assert_eq!(pr_info.labels, vec!["bug", "priority/high"]);
@@ -285,7 +279,6 @@ mod tests {
 
         let pr_info = result.unwrap();
         assert_eq!(pr_info.author_login, "dependabot[bot]");
-        assert_eq!(pr_info.author_search_format, "app/dependabot");
         assert_eq!(pr_info.author_simple_name, "dependabot");
     }
 
@@ -300,7 +293,6 @@ mod tests {
 
         let pr_info = result.unwrap();
         assert_eq!(pr_info.author_login, "Unknown");
-        assert_eq!(pr_info.author_search_format, "Unknown");
         assert_eq!(pr_info.author_simple_name, "Unknown");
     }
 

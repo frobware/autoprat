@@ -2,8 +2,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use autoprat::{
     AppRequest, CheckConclusion, CheckInfo, CheckName, CheckState, CheckUrl, CommentAction,
-    CommentInfo, DisplayMode, Forge, PrAction, PullRequest, QueryResult, Repo, fetch_pull_requests,
-    fetch_pull_requests_at, parse_args,
+    CommentInfo, DisplayMode, Forge, PrAction, PullRequest, QueryResult, Repo, SearchCriterion,
+    fetch_pull_requests, fetch_pull_requests_at, parse_args,
     search::{FetchPlan, RepoSearch},
 };
 use chrono::{TimeZone, Utc};
@@ -80,7 +80,6 @@ fn behavioural_pr(number: u64, title: &str, recent_comments: Vec<CommentInfo>) -
         number,
         title: title.to_string(),
         author_login: "alice".to_string(),
-        author_search_format: "alice".to_string(),
         author_simple_name: "alice".to_string(),
         url: format!("https://github.com/owner/repo/pull/{number}"),
         labels: vec![],
@@ -114,7 +113,7 @@ fn test_cli_args_describe_user_search_fetch_plan() {
     assert_eq!(
         plan,
         FetchPlan::UserSearch {
-            query: "author:alice is:pr is:open".to_string(),
+            query: "author:alice".to_string(),
             limit: 25,
         }
     );
@@ -139,8 +138,11 @@ fn test_cli_args_describe_repository_search_fetch_plan() {
         plan,
         FetchPlan::RepositorySearches(vec![RepoSearch {
             repo: test_repo(),
-            query: "repo:owner/repo -label:approved label:bug -label:wip type:pr state:open sort:created-asc"
-                .to_string(),
+            criteria: vec![
+                SearchCriterion::MissingLabel("approved".to_string()),
+                SearchCriterion::PresentLabel("bug".to_string()),
+                SearchCriterion::MissingLabel("wip".to_string()),
+            ],
             limit: 40,
         }])
     );
@@ -156,7 +158,6 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             number: 123,
             title: "Bump lodash from 4.17.19 to 4.17.21".to_string(),
             author_login: "dependabot[bot]".to_string(),
-            author_search_format: "app/dependabot".to_string(),
             author_simple_name: "dependabot".to_string(),
             url: "https://github.com/owner/repo/pull/123".to_string(),
             labels: vec!["dependencies".to_string()],
@@ -178,7 +179,6 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             number: 124,
             title: "Fix memory leak in worker threads".to_string(),
             author_login: "alice".to_string(),
-            author_search_format: "alice".to_string(),
             author_simple_name: "alice".to_string(),
             url: "https://github.com/owner/repo/pull/124".to_string(),
             labels: vec!["bug".to_string(), "approved".to_string()],
@@ -209,7 +209,6 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             number: 125,
             title: "Add new dashboard widget".to_string(),
             author_login: "bob".to_string(),
-            author_search_format: "bob".to_string(),
             author_simple_name: "bob".to_string(),
             url: "https://github.com/owner/repo/pull/125".to_string(),
             labels: vec!["feature".to_string(), "enhancement".to_string()],
@@ -240,7 +239,6 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             number: 126,
             title: "Update README.md".to_string(),
             author_login: "charlie".to_string(),
-            author_search_format: "charlie".to_string(),
             author_simple_name: "charlie".to_string(),
             url: "https://github.com/owner/repo/pull/126".to_string(),
             labels: vec![],
@@ -262,7 +260,6 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             number: 127,
             title: "Implement user authentication".to_string(),
             author_login: "alice".to_string(),
-            author_search_format: "alice".to_string(),
             author_simple_name: "alice".to_string(),
             url: "https://github.com/owner/repo/pull/127".to_string(),
             labels: vec!["feature".to_string()],
@@ -300,7 +297,6 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             number: 128,
             title: "Update dependency jest to v27".to_string(),
             author_login: "renovate[bot]".to_string(),
-            author_search_format: "app/renovate".to_string(),
             author_simple_name: "renovate".to_string(),
             url: "https://github.com/owner/repo/pull/128".to_string(),
             labels: vec!["dependencies".to_string()],
@@ -322,7 +318,6 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             number: 129,
             title: "Fix race condition in API handler".to_string(),
             author_login: "bob".to_string(),
-            author_search_format: "bob".to_string(),
             author_simple_name: "bob".to_string(),
             url: "https://github.com/owner/repo/pull/129".to_string(),
             labels: vec![
@@ -357,7 +352,6 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             number: 130,
             title: "Add new feature from external contributor".to_string(),
             author_login: "external-contributor".to_string(),
-            author_search_format: "external-contributor".to_string(),
             author_simple_name: "external-contributor".to_string(),
             url: "https://github.com/owner/repo/pull/130".to_string(),
             labels: vec!["needs-ok-to-test".to_string(), "external".to_string()],
@@ -373,7 +367,6 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             number: 131,
             title: "Minor fix with LGTM".to_string(),
             author_login: "developer".to_string(),
-            author_search_format: "developer".to_string(),
             author_simple_name: "developer".to_string(),
             url: "https://github.com/owner/repo/pull/131".to_string(),
             labels: vec!["lgtm".to_string(), "bug".to_string()],
@@ -576,6 +569,22 @@ async fn test_filter_author_bot_formats() {
     assert_eq!(result.filtered_prs.len(), 1);
     assert_eq!(result.filtered_prs[0].number, 123);
     assert_eq!(result.filtered_prs[0].author_simple_name, "dependabot");
+
+    let result = run_autoprat_test(
+        vec![
+            "autoprat",
+            "--repo",
+            "owner/repo",
+            "--author",
+            "app/dependabot",
+        ],
+        &provider,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.filtered_prs.len(), 1);
+    assert_eq!(result.filtered_prs[0].number, 123);
 }
 
 #[tokio::test]
@@ -2462,7 +2471,12 @@ async fn test_fixed_clock_shell_output_for_throttled_grouped_comments() {
     .unwrap();
 
     let mut output = Vec::new();
-    autoprat::shell::write_shell_commands(&result.executable_actions, &mut output).unwrap();
+    autoprat::shell::write_shell_commands(
+        &autoprat::GhCliRenderer,
+        &result.executable_actions,
+        &mut output,
+    )
+    .unwrap();
 
     assert_eq!(
         String::from_utf8(output).unwrap(),
@@ -3318,7 +3332,6 @@ async fn test_multi_repository_urls() {
             number: 443,
             title: "Add user authentication system".to_string(),
             author_login: "dev-alice".to_string(),
-            author_search_format: "dev-alice".to_string(),
             author_simple_name: "dev-alice".to_string(),
             url: "https://github.com/acme/web-app/pull/443".to_string(),
             labels: vec!["enhancement".to_string()],
@@ -3340,7 +3353,6 @@ async fn test_multi_repository_urls() {
             number: 656,
             title: "Fix API rate limiting bug".to_string(),
             author_login: "dev-bob".to_string(),
-            author_search_format: "dev-bob".to_string(),
             author_simple_name: "dev-bob".to_string(),
             url: "https://github.com/widgets/api-service/pull/656".to_string(),
             labels: vec!["bug".to_string()],
@@ -3437,7 +3449,6 @@ async fn test_multi_repository_urls_with_filters() {
             number: 100,
             title: "Add new feature".to_string(),
             author_login: "alice".to_string(),
-            author_search_format: "alice".to_string(),
             author_simple_name: "alice".to_string(),
             url: "https://github.com/acme/web-app/pull/100".to_string(),
             labels: vec!["feature".to_string()],
@@ -3453,7 +3464,6 @@ async fn test_multi_repository_urls_with_filters() {
             number: 200,
             title: "Fix bug".to_string(),
             author_login: "bob".to_string(),
-            author_search_format: "bob".to_string(),
             author_simple_name: "bob".to_string(),
             url: "https://github.com/widgets/api-service/pull/200".to_string(),
             labels: vec!["bug".to_string()],
@@ -3469,7 +3479,6 @@ async fn test_multi_repository_urls_with_filters() {
             number: 300,
             title: "Update documentation".to_string(),
             author_login: "alice".to_string(),
-            author_search_format: "alice".to_string(),
             author_simple_name: "alice".to_string(),
             url: "https://github.com/tools/cli-utils/pull/300".to_string(),
             labels: vec!["documentation".to_string()],
@@ -3532,7 +3541,6 @@ async fn test_multi_repository_urls_with_actions() {
             number: 100,
             title: "Add feature".to_string(),
             author_login: "alice".to_string(),
-            author_search_format: "alice".to_string(),
             author_simple_name: "alice".to_string(),
             url: "https://github.com/acme/web-app/pull/100".to_string(),
             labels: vec!["feature".to_string()], // No "approved" label
@@ -3548,7 +3556,6 @@ async fn test_multi_repository_urls_with_actions() {
             number: 200,
             title: "Fix bug".to_string(),
             author_login: "bob".to_string(),
-            author_search_format: "bob".to_string(),
             author_simple_name: "bob".to_string(),
             url: "https://github.com/widgets/api-service/pull/200".to_string(),
             labels: vec!["bug".to_string(), "approved".to_string()], // Already approved
@@ -4220,7 +4227,6 @@ fn pr_with_commits(number: u64, commit_count: u64) -> PullRequest {
         number,
         title: format!("PR with {commit_count} commits"),
         author_login: "alice".to_string(),
-        author_search_format: "alice".to_string(),
         author_simple_name: "alice".to_string(),
         url: format!("https://github.com/owner/repo/pull/{number}"),
         labels: vec!["needs-ok-to-test".to_string()],

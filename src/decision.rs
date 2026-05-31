@@ -30,7 +30,10 @@ pub fn pull_request_matches(
             .prs
             .iter()
             .any(|id| pr.repo == id.repo && pr.number == id.number))
-        && fetch.search_filters.iter().all(|sf| sf.matches(pr))
+        && fetch
+            .search_criteria
+            .iter()
+            .all(|criterion| criterion.matches(pr))
         && selection.post_filters.iter().all(|pf| pf.matches(pr))
 }
 
@@ -191,9 +194,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        filters::{AuthorPost, NeedsLgtmSearch},
+        filters::AuthorPost,
         pr_selector::PrIdentifier,
-        types::{CommentInfo, PullRequest, Repo},
+        types::{CommentInfo, PullRequest, Repo, SearchCriterion},
     };
 
     fn pr_with_comments(recent_comments: Vec<CommentInfo>) -> PullRequest {
@@ -202,7 +205,6 @@ mod tests {
             number: 123,
             title: "Test PR".to_string(),
             author_login: "alice".to_string(),
-            author_search_format: "alice".to_string(),
             author_simple_name: "alice".to_string(),
             url: "https://github.com/owner/repo/pull/123".to_string(),
             labels: vec![],
@@ -298,7 +300,6 @@ mod tests {
         let mut pr = pr_with_comments(vec![]);
         pr.number = 124;
         pr.author_login = "alice".to_string();
-        pr.author_search_format = "alice".to_string();
 
         let fetch = FetchCriteria {
             repos: vec![],
@@ -308,7 +309,7 @@ mod tests {
             }],
             query: None,
             limit: 100,
-            search_filters: vec![Box::new(NeedsLgtmSearch)],
+            search_criteria: vec![SearchCriterion::MissingLabel("lgtm".to_string())],
         };
         let selection = SelectionPolicy {
             exclude: vec![],

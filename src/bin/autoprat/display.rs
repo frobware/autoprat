@@ -878,7 +878,6 @@ mod tests {
             number: 101,
             title: "Add authentication system".to_string(),
             author_login: "alice".to_string(),
-            author_search_format: "alice".to_string(),
             author_simple_name: "alice".to_string(),
             url: "https://github.com/owner/repo/pull/101".to_string(),
             labels: vec!["enhancement".to_string(), "approved".to_string()],
