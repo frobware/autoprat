@@ -14,21 +14,49 @@ fn build_request_from_args(raw_args: Vec<&str>) -> Result<AppRequest> {
     parse_args_and_create_request_from(raw_args)
 }
 
-/// Mock GitHub hub for testing
-pub struct MockHub {
-    pub mock_data: Vec<PullRequest>,
+/// Forge-neutral fake that honours the neutral fetch contract in memory.
+pub struct FakeForge {
+    pub prs: Vec<PullRequest>,
 }
 
-impl MockHub {
-    pub fn new(mock_data: Vec<PullRequest>) -> Self {
-        Self { mock_data }
+impl FakeForge {
+    pub fn new(prs: Vec<PullRequest>) -> Self {
+        Self { prs }
     }
 }
 
 #[async_trait]
-impl Forge for MockHub {
-    async fn fetch_pull_requests(&self, _plan: &FetchPlan) -> Result<Vec<PullRequest>> {
-        Ok(self.mock_data.clone())
+impl Forge for FakeForge {
+    async fn fetch_pull_requests(&self, plan: &FetchPlan) -> Result<Vec<PullRequest>> {
+        Ok(match plan {
+            FetchPlan::SpecificPullRequests(identifiers) => self
+                .prs
+                .iter()
+                .filter(|pr| {
+                    identifiers
+                        .iter()
+                        .any(|id| pr.repo == id.repo && pr.number == id.number)
+                })
+                .cloned()
+                .collect(),
+            FetchPlan::UserSearch { limit, .. } => self.prs.iter().take(*limit).cloned().collect(),
+            FetchPlan::RepositorySearches(searches) => searches
+                .iter()
+                .flat_map(|search| {
+                    self.prs
+                        .iter()
+                        .filter(move |pr| {
+                            pr.repo == search.repo
+                                && search
+                                    .criteria
+                                    .iter()
+                                    .all(|criterion| criterion.matches(pr))
+                        })
+                        .take(search.limit)
+                        .cloned()
+                })
+                .collect(),
+        })
     }
 }
 
@@ -145,6 +173,43 @@ fn test_cli_args_describe_repository_search_fetch_plan() {
             ],
             limit: 40,
         }])
+    );
+}
+
+#[tokio::test]
+async fn fake_forge_honours_specific_pull_request_fetch_plans() {
+    let requested = behavioural_pr(123, "Requested", vec![]);
+    let other = behavioural_pr(124, "Other", vec![]);
+    let forge = FakeForge::new(vec![other, requested]);
+    let plan = FetchPlan::SpecificPullRequests(vec![autoprat::PrIdentifier::new(test_repo(), 123)]);
+
+    let fetched = forge.fetch_pull_requests(&plan).await.unwrap();
+
+    assert_eq!(
+        fetched.iter().map(|pr| pr.number).collect::<Vec<_>>(),
+        vec![123]
+    );
+}
+
+#[tokio::test]
+async fn fake_forge_honours_repository_search_criteria() {
+    let mut wrong_repo = behavioural_pr(123, "Wrong repo", vec![]);
+    wrong_repo.repo = Repo::new("other", "repo").unwrap();
+    let mut labelled = behavioural_pr(124, "Already approved", vec![]);
+    labelled.labels = vec!["approved".to_string()];
+    let matching = behavioural_pr(125, "Needs approval", vec![]);
+    let forge = FakeForge::new(vec![wrong_repo, labelled, matching]);
+    let plan = FetchPlan::RepositorySearches(vec![RepoSearch {
+        repo: test_repo(),
+        criteria: vec![SearchCriterion::MissingLabel("approved".to_string())],
+        limit: 10,
+    }]);
+
+    let fetched = forge.fetch_pull_requests(&plan).await.unwrap();
+
+    assert_eq!(
+        fetched.iter().map(|pr| pr.number).collect::<Vec<_>>(),
+        vec![125]
     );
 }
 
@@ -387,7 +452,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
 
 #[tokio::test]
 async fn test_cli_validation_no_arguments() {
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
     let result = run_autoprat_test(vec!["autoprat"], &provider).await;
 
     assert!(result.is_err());
@@ -402,7 +467,7 @@ async fn test_cli_validation_no_arguments() {
 #[tokio::test]
 async fn test_cli_validation_valid_repo_only() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(vec!["autoprat", "--repo", "owner/repo"], &provider).await;
     assert!(result.is_ok());
@@ -415,7 +480,7 @@ async fn test_cli_validation_valid_repo_only() {
 #[tokio::test]
 async fn test_cli_validation_valid_query_only() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--query", "repo:owner/repo author:alice"],
@@ -432,7 +497,7 @@ async fn test_cli_validation_valid_query_only() {
 #[tokio::test]
 async fn test_cli_validation_pr_args_mixed_formats() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data.clone());
+    let provider = FakeForge::new(mock_data.clone());
 
     let result = run_autoprat_test(
         vec![
@@ -458,7 +523,7 @@ async fn test_cli_validation_pr_args_mixed_formats() {
     assert!(pr_numbers.contains(&125));
 
     // Test 2: PR URLs only (no --repo needed)
-    let provider = MockHub::new(mock_data.clone());
+    let provider = FakeForge::new(mock_data.clone());
     let result = run_autoprat_test(
         vec![
             "autoprat",
@@ -478,7 +543,7 @@ async fn test_cli_validation_pr_args_mixed_formats() {
     assert!(!pr_numbers.contains(&124)); // PR 124 was not requested
 
     // Test 3: PR numbers only with --repo
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "123", "125"],
         &provider,
@@ -497,7 +562,7 @@ async fn test_cli_validation_pr_args_mixed_formats() {
 #[tokio::test]
 async fn test_cli_validation_prs_numbers_require_repo() {
     // Test: PR numbers without --repo should fail
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
 
     let result = run_autoprat_test(vec!["autoprat", "123", "456"], &provider).await;
     assert!(result.is_err());
@@ -512,7 +577,7 @@ async fn test_cli_validation_prs_numbers_require_repo() {
 #[tokio::test]
 async fn test_cli_validation_query_conflicts_with_repo() {
     // Test: --query with --repo should fail
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
 
     let result = run_autoprat_test(
         vec![
@@ -537,7 +602,7 @@ async fn test_cli_validation_query_conflicts_with_repo() {
 #[tokio::test]
 async fn test_cli_validation_query_conflicts_with_prs() {
     // Test: --query with --prs should fail
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--query", "author:alice", "123"],
@@ -556,7 +621,7 @@ async fn test_cli_validation_query_conflicts_with_prs() {
 #[tokio::test]
 async fn test_filter_author_bot_formats() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--author", "dependabot"],
@@ -590,7 +655,7 @@ async fn test_filter_author_bot_formats() {
 #[tokio::test]
 async fn test_filter_author_regular_user() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--author", "alice"],
@@ -614,7 +679,7 @@ async fn test_filter_author_regular_user() {
 #[tokio::test]
 async fn test_filter_label_basic() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--label", "feature"],
@@ -645,7 +710,7 @@ async fn test_filter_label_basic() {
 async fn test_filter_needs_approve() {
     // Test that --needs-approve matches PRs without the approved label
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--needs-approve"],
@@ -673,7 +738,7 @@ async fn test_filter_needs_approve() {
 async fn test_filter_combination_author_label() {
     // Test that --author alice --label bug matches only alice's PR with bug label
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -702,7 +767,7 @@ async fn test_filter_combination_author_label() {
 async fn test_filter_failing_ci_basic() {
     // Test that --failing-ci matches PRs with failing CI checks
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--failing-ci"],
@@ -760,7 +825,7 @@ async fn test_filter_failing_ci_basic() {
 async fn test_filter_failing_check_basic() {
     // Test that --failing-check matches PRs with specific failing checks
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test specific failing check: ci/test
     let result = run_autoprat_test(
@@ -798,7 +863,7 @@ async fn test_filter_failing_check_basic() {
 async fn test_filter_failing_check_specific_name() {
     // Test that --failing-check matches only the exact check name
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test specific failing check: ci/lint (only PR 127 has this failing)
     let result = run_autoprat_test(
@@ -838,7 +903,7 @@ async fn test_filter_failing_check_specific_name() {
 async fn test_filter_failing_check_multiple() {
     // Test that --failing-check with multiple values requires ALL to be failing
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test multiple failing checks: ci/build AND ci/test (only PR 125 has both failing)
     let result = run_autoprat_test(
@@ -878,7 +943,7 @@ async fn test_filter_failing_check_multiple() {
 async fn test_filter_combination_failing_ci_author() {
     // Test --failing-ci combined with other filters
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test --failing-ci + --author alice (should match PR 127)
     let result = run_autoprat_test(
@@ -913,7 +978,7 @@ async fn test_filter_combination_failing_ci_author() {
 async fn test_filter_combination_failing_ci_label() {
     // Test --failing-ci combined with label filters
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test --failing-ci + --label feature (should match PR 125 and 127)
     let result = run_autoprat_test(
@@ -953,7 +1018,7 @@ async fn test_filter_combination_failing_ci_label() {
 async fn test_filter_combination_failing_check_needs_approve() {
     // Test --failing-check combined with --needs-approve
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test --failing-check ci/test + --needs-approve
     let result = run_autoprat_test(
@@ -998,7 +1063,7 @@ async fn test_filter_combination_failing_check_needs_approve() {
 #[tokio::test]
 async fn test_cli_validation_pr_url_repo_mismatch() {
     // Test that PR URLs must match the specified repo
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
 
     let result = run_autoprat_test(
         vec![
@@ -1018,7 +1083,7 @@ async fn test_cli_validation_pr_url_repo_mismatch() {
 async fn test_cli_validation_query_passthrough() {
     // Test that --query passes through exactly what user specifies (GIGO)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--query", "repo:owner/repo author:alice"],
@@ -1036,7 +1101,7 @@ async fn test_cli_validation_query_passthrough() {
 async fn test_cli_validation_display_mode_conflicts() {
     // Test: conflicting display modes should work (last one wins or they combine)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--quiet", "--detailed"],
@@ -1050,7 +1115,7 @@ async fn test_cli_validation_display_mode_conflicts() {
 #[tokio::test]
 async fn test_cli_validation_malformed_repo_format() {
     // Test: malformed repo format should fail
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "not-a-valid-repo-format"],
@@ -1074,7 +1139,7 @@ async fn test_cli_validation_malformed_repo_format() {
 #[tokio::test]
 async fn test_cli_validation_empty_repo_format() {
     // Test: empty repo should fail
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
 
     let result = run_autoprat_test(vec!["autoprat", "--repo", ""], &provider).await;
     assert!(result.is_err());
@@ -1083,7 +1148,7 @@ async fn test_cli_validation_empty_repo_format() {
 #[tokio::test]
 async fn test_cli_validation_repo_edge_cases() {
     // Test additional edge cases for repo format validation
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
 
     let edge_cases = vec![
         "owner/",           // Empty repo name
@@ -1102,7 +1167,7 @@ async fn test_cli_validation_repo_edge_cases() {
 async fn test_action_multiple_combination() {
     // Test: multiple actions should work together
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1127,7 +1192,7 @@ async fn test_action_multiple_combination() {
 async fn test_filter_combination_multiple() {
     // Test: multiple filters should work together (AND logic)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1152,7 +1217,7 @@ async fn test_filter_combination_multiple() {
 async fn test_action_with_custom_comments() {
     // Test: actions combined with custom comments
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1198,7 +1263,7 @@ async fn test_custom_comment_throttling() {
         created_at: Utc::now() - chrono::Duration::minutes(2), // 2 minutes ago - should be throttled
     });
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1249,7 +1314,7 @@ async fn test_custom_comment_throttling_seconds() {
         created_at: Utc::now() - chrono::Duration::seconds(15), // 15 seconds ago
     });
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1297,7 +1362,7 @@ async fn test_idempotent_action_comment_history_check() {
     // Remove the lgtm label to simulate GitHub being slow
     mock_data[0].labels.retain(|l| l != "lgtm");
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1346,7 +1411,7 @@ async fn test_idempotent_action_approve_comment_history() {
     // Remove the approved label to simulate GitHub being slow
     mock_data[0].labels.retain(|l| l != "approved");
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--approve"],
@@ -1377,7 +1442,7 @@ async fn test_custom_comment_history_check() {
         created_at: Utc::now() - chrono::Duration::minutes(20),
     });
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1422,7 +1487,7 @@ async fn test_history_check_with_throttle_both_apply() {
     // Remove the lgtm label
     mock_data[0].labels.retain(|l| l != "lgtm");
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1463,7 +1528,7 @@ async fn test_history_check_multiline_comment() {
     // Remove the lgtm label
     mock_data[0].labels.retain(|l| l != "lgtm");
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--lgtm"],
@@ -1507,7 +1572,7 @@ async fn test_label_removed_after_comment_posted() {
         });
     }
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--lgtm"],
@@ -1546,7 +1611,7 @@ async fn test_history_check_1_hour_threshold() {
     // Remove the lgtm label
     mock_data[0].labels.retain(|l| l != "lgtm");
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--lgtm"],
@@ -1591,7 +1656,7 @@ async fn test_history_check_within_1_hour_and_recent_position() {
     // Remove the lgtm label
     mock_data[0].labels.retain(|l| l != "lgtm");
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--lgtm"],
@@ -1630,7 +1695,7 @@ async fn test_history_check_custom_max_age() {
     // Remove the lgtm label
     mock_data[0].labels.retain(|l| l != "lgtm");
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // With custom --history-max-age 30m, comment at 45min should allow re-posting
     let result = run_autoprat_test(
@@ -1683,7 +1748,7 @@ async fn test_history_check_custom_max_comments() {
     // Remove the lgtm label
     mock_data[0].labels.retain(|l| l != "lgtm");
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // With custom --history-max-comments 2, /lgtm should be outside the window
     let result = run_autoprat_test(
@@ -1717,7 +1782,7 @@ async fn test_history_check_custom_max_comments() {
 #[tokio::test]
 async fn test_cli_validation_invalid_pr_url_format() {
     // Test: malformed PR URLs should fail gracefully
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
 
     let result = run_autoprat_test(
         vec![
@@ -1741,7 +1806,7 @@ async fn test_cli_validation_invalid_pr_url_format() {
 async fn test_cli_validation_limit_values() {
     // Test: limit values should be validated
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test with limit 0 - should work but return no results
     let result = run_autoprat_test(
@@ -1764,7 +1829,7 @@ async fn test_cli_validation_limit_values() {
 async fn test_cli_validation_throttle_formats() {
     // Test: currently supported throttle formats (unitless, seconds, minutes, hours)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test currently supported throttle formats (unitless, seconds, minutes, hours)
     for throttle in ["5", "30s", "5m", "2h", "30", "30m", "60m", "120m"] {
@@ -1792,7 +1857,7 @@ async fn test_cli_validation_throttle_formats() {
 async fn test_cli_validation_throttle_time_units() {
     // Test: specific time unit conversions work correctly
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data.clone());
+    let provider = FakeForge::new(mock_data.clone());
 
     // Test seconds: "30s" should be 30 seconds
     let result = run_autoprat_test(
@@ -1811,7 +1876,7 @@ async fn test_cli_validation_throttle_time_units() {
     // Test that throttle parsing succeeds - actual throttling behavior is tested elsewhere
 
     // Test hours: "2h" should be 2 hours = 7200 seconds
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
     let result = run_autoprat_test(
         vec![
             "autoprat",
@@ -1832,7 +1897,7 @@ async fn test_cli_validation_throttle_time_units() {
 async fn test_cli_validation_unsupported_throttle_formats() {
     // Test: complex formats not yet supported should fail with clear error
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test unsupported throttle formats (complex combinations and units)
     for throttle in ["2h30m", "1d", "1w"] {
@@ -1869,7 +1934,7 @@ async fn test_cli_validation_unsupported_throttle_formats() {
 async fn test_cli_validation_malformed_throttle() {
     // Test: malformed throttle values should fail
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test invalid throttle formats
     for throttle in ["5x", "invalid", "m5", "5.5", "abc123"] {
@@ -1906,7 +1971,7 @@ async fn test_cli_validation_malformed_throttle() {
 async fn test_cli_validation_empty_comment() {
     // Test: empty comments should be handled gracefully
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--comment", ""],
@@ -1924,7 +1989,7 @@ async fn test_cli_validation_empty_comment() {
 async fn test_cli_validation_empty_throttle() {
     // Test: empty throttle should be handled gracefully (treated as no throttle)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1947,7 +2012,7 @@ async fn test_cli_validation_empty_throttle() {
 async fn test_cli_validation_unitless_throttle() {
     // Test: unitless numbers should default to minutes
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1970,7 +2035,7 @@ async fn test_cli_validation_unitless_throttle() {
 async fn test_filter_label_negation_syntax() {
     // Test: --label bug --label -approved should match PRs with "bug" but NOT "approved"
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -1999,7 +2064,7 @@ async fn test_filter_label_negation_syntax() {
 async fn test_filter_label_negation_only() {
     // Test: --label -approved should match PRs that do NOT have "approved" label
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2031,7 +2096,7 @@ async fn test_filter_label_negation_only() {
 async fn test_action_without_filters() {
     // Test: actions should work without any filters (act on all PRs)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--approve", "--lgtm"],
@@ -2050,7 +2115,7 @@ async fn test_action_without_filters() {
 async fn test_action_none_display_only() {
     // Test: filters should work without actions (display only)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--author", "alice"],
@@ -2068,7 +2133,7 @@ async fn test_action_none_display_only() {
 async fn test_integration_complex_workflow() {
     // Test: realistic complex CLI usage
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2103,7 +2168,7 @@ async fn test_integration_complex_workflow() {
 async fn test_action_ok_to_test() {
     // Test that --ok-to-test action creates the correct comment action
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--ok-to-test"],
@@ -2128,7 +2193,7 @@ async fn test_action_ok_to_test() {
 async fn test_filter_needs_ok_to_test() {
     // Test that --needs-ok-to-test filter matches only PRs with needs-ok-to-test label
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--needs-ok-to-test"],
@@ -2148,7 +2213,7 @@ async fn test_filter_needs_ok_to_test() {
 async fn test_filter_needs_ok_to_test_with_action() {
     // Test --needs-ok-to-test filter combined with --ok-to-test action
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2181,7 +2246,7 @@ async fn test_filter_needs_ok_to_test_with_action() {
 async fn test_action_close() {
     // Test that --close action works and applies to all PRs
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--close"],
@@ -2220,7 +2285,7 @@ async fn test_action_close() {
 async fn test_action_close_with_filters() {
     // Test --close action combined with filters (should only close filtered PRs)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2260,7 +2325,7 @@ async fn test_action_close_with_filters() {
 async fn test_action_close_with_multiple_actions() {
     // Test --close combined with other actions (should create multiple actions per PR)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2309,7 +2374,7 @@ async fn test_action_close_with_multiple_actions() {
 async fn test_multiple_comments_only() {
     // Test: multiple comments without other actions
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2343,7 +2408,7 @@ async fn test_multiple_comments_only() {
 async fn test_multiple_comments_with_filters() {
     // Test: multiple comments with filtering
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2392,7 +2457,7 @@ async fn test_multiple_comments_with_throttling() {
         created_at: Utc::now() - chrono::Duration::minutes(2), // 2 minutes ago - should be throttled
     });
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2438,7 +2503,7 @@ async fn test_multiple_comments_with_throttling() {
 #[tokio::test]
 async fn test_fixed_clock_shell_output_for_throttled_grouped_comments() {
     let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
-    let provider = MockHub::new(vec![
+    let provider = FakeForge::new(vec![
         behavioural_pr(
             201,
             "Partial pruning",
@@ -2491,7 +2556,7 @@ async fn test_fixed_clock_shell_output_for_throttled_grouped_comments() {
 async fn test_mixed_actions_with_multiple_comments() {
     // Test: multiple comments combined with standard actions
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2534,7 +2599,7 @@ async fn test_mixed_actions_with_multiple_comments() {
 async fn test_empty_and_whitespace_comments() {
     // Test: edge cases with empty and whitespace-only comments
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2572,7 +2637,7 @@ async fn test_empty_and_whitespace_comments() {
 async fn test_filter_needs_lgtm() {
     // Test that --needs-lgtm filter matches only PRs without lgtm label
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--needs-lgtm"],
@@ -2603,7 +2668,7 @@ async fn test_filter_needs_lgtm() {
 async fn test_filter_needs_lgtm_with_action() {
     // Test --needs-lgtm filter combined with --lgtm action
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--needs-lgtm", "--lgtm"],
@@ -2637,7 +2702,7 @@ async fn test_filter_needs_lgtm_with_action() {
 async fn test_filter_needs_lgtm_with_other_filters() {
     // Test --needs-lgtm combined with other filters
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2666,7 +2731,7 @@ async fn test_filter_needs_lgtm_with_other_filters() {
 async fn test_filter_needs_lgtm_combined_with_needs_approve() {
     // Test --needs-lgtm combined with --needs-approve (both filters should apply)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -2889,7 +2954,7 @@ fn test_parse_args_pr_number_requires_repo() {
 #[tokio::test]
 async fn test_filter_title_short_flag() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test -t short flag works the same as --title
     let result = run_autoprat_test(
@@ -2908,7 +2973,7 @@ async fn test_filter_title_short_flag() {
 #[tokio::test]
 async fn test_filter_title_contains() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test filtering by title containing "dashboard"
     let result = run_autoprat_test(
@@ -2972,7 +3037,7 @@ async fn test_filter_title_contains() {
 #[tokio::test]
 async fn test_filter_title_with_other_filters() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test combining title filter with author filter
     let result = run_autoprat_test(
@@ -3026,7 +3091,7 @@ async fn test_filter_title_with_other_filters() {
 #[tokio::test]
 async fn test_filter_title_regex() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Regex pattern matching titles starting with "Fix"
     let result = run_autoprat_test(
@@ -3093,7 +3158,7 @@ async fn test_filter_title_regex() {
 #[tokio::test]
 async fn test_filter_title_invalid_regex() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Invalid regex should match nothing (graceful failure)
     let result = run_autoprat_test(
@@ -3111,7 +3176,7 @@ async fn test_filter_title_invalid_regex() {
 #[tokio::test]
 async fn test_output_selection_with_actions() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test case: Actions requested but no PRs match action conditions
     // Should output empty shell commands, not table
@@ -3152,7 +3217,7 @@ async fn test_output_selection_with_actions() {
 #[tokio::test]
 async fn test_output_selection_without_actions() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test case: No actions requested - should display table
     let request = build_request_from_args(vec![
@@ -3190,7 +3255,7 @@ async fn test_output_selection_without_actions() {
 #[tokio::test]
 async fn test_output_selection_with_custom_comments() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test case: Custom comments requested - should output commands
     let request = build_request_from_args(vec![
@@ -3229,7 +3294,7 @@ async fn test_output_selection_with_custom_comments() {
 #[tokio::test]
 async fn test_output_selection_with_mixed_actions() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test case: Mix of built-in actions and custom comments
     let request = build_request_from_args(vec![
@@ -3270,7 +3335,7 @@ async fn test_output_selection_with_mixed_actions() {
 #[tokio::test]
 async fn test_output_selection_actions_with_empty_filtered_prs() {
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test case: Actions requested but filtering produces no PRs
     // This is the critical case - should output empty commands, not table
@@ -3379,7 +3444,7 @@ async fn test_multi_repository_urls() {
         },
     ];
 
-    let provider = MockHub::new(multi_repo_mock_data);
+    let provider = FakeForge::new(multi_repo_mock_data);
 
     // Test multi-repository URL handling
     let result = run_autoprat_test(
@@ -3490,7 +3555,7 @@ async fn test_multi_repository_urls_with_filters() {
         },
     ];
 
-    let provider = MockHub::new(multi_repo_mock_data);
+    let provider = FakeForge::new(multi_repo_mock_data);
 
     // Test filtering by author across multiple repositories
     let result = run_autoprat_test(
@@ -3567,7 +3632,7 @@ async fn test_multi_repository_urls_with_actions() {
         },
     ];
 
-    let provider = MockHub::new(multi_repo_mock_data);
+    let provider = FakeForge::new(multi_repo_mock_data);
 
     // Test approve action across multiple repositories
     let result = run_autoprat_test(
@@ -3601,7 +3666,7 @@ async fn test_multi_repository_urls_with_actions() {
 async fn test_exclude_pr_by_number() {
     // Test: --exclude with PR numbers should filter out specific PRs
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -3643,7 +3708,7 @@ async fn test_exclude_pr_by_number() {
 async fn test_exclude_pr_by_url() {
     // Test: --exclude with PR URLs should filter out specific PRs
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -3682,7 +3747,7 @@ async fn test_exclude_pr_by_url() {
 async fn test_exclude_mixed_numbers_and_urls() {
     // Test: --exclude with mix of numbers and URLs
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -3716,7 +3781,7 @@ async fn test_exclude_mixed_numbers_and_urls() {
 async fn test_exclude_with_specific_pr_list() {
     // Test: --exclude works when targeting specific PRs
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -3751,7 +3816,7 @@ async fn test_exclude_range_and_singleton_from_targeted_range() {
     // then carve out a sub-range and a single PR with --exclude. The
     // survivors are the targeted set minus both exclusions.
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -3787,7 +3852,7 @@ async fn test_exclude_range_and_singleton_from_targeted_range() {
 #[tokio::test]
 async fn test_exclude_validation_requires_repo() {
     // Test: --exclude with PR numbers requires --repo
-    let provider = MockHub::new(vec![]);
+    let provider = FakeForge::new(vec![]);
 
     let result = run_autoprat_test(
         vec![
@@ -3810,7 +3875,7 @@ async fn test_exclude_validation_requires_repo() {
 async fn test_exclude_empty_string() {
     // Test: --exclude with empty string should be a no-op (user-friendly)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -3857,7 +3922,7 @@ async fn test_exclude_empty_string() {
 async fn test_exclude_comma_separated_numbers() {
     // Test: --exclude with comma-separated PR numbers
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -3902,7 +3967,7 @@ async fn test_exclude_comma_separated_numbers() {
 async fn test_exclude_comma_separated_urls() {
     // Test: --exclude with comma-separated PR URLs
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -3935,7 +4000,7 @@ async fn test_exclude_comma_separated_urls() {
 async fn test_exclude_mixed_comma_and_multiple_flags() {
     // Test: --exclude with mix of comma-separated and multiple flags
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec![
@@ -3973,7 +4038,7 @@ async fn test_exclude_mixed_comma_and_multiple_flags() {
 async fn test_exclude_comma_separated_edge_cases() {
     // Test: edge cases with comma-separated values
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     // Test with trailing comma (should work now - empty strings are skipped)
     let result = run_autoprat_test(
@@ -4080,7 +4145,7 @@ async fn test_action_hold() {
     // Test that --hold action creates the correct comment action for all PRs
     // (none of the mock PRs have do-not-merge/hold label)
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--hold"],
@@ -4107,7 +4172,7 @@ async fn test_action_hold_skips_already_held_prs() {
     // Add do-not-merge/hold label to PR 123
     mock_data[0].labels.push("do-not-merge/hold".to_string());
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--hold"],
@@ -4142,7 +4207,7 @@ async fn test_action_hold_idempotent_comment_history() {
     // PR 123 does NOT have do-not-merge/hold label (simulating slow GitHub)
     mock_data[0].labels.retain(|l| l != "do-not-merge/hold");
 
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--hold"],
@@ -4193,7 +4258,7 @@ fn test_hold_action_parses() {
 async fn test_action_hold_grouped_with_other_comments() {
     // Test that --hold groups with other comment actions
     let mock_data = create_mock_github_data();
-    let provider = MockHub::new(mock_data);
+    let provider = FakeForge::new(mock_data);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--hold", "--approve"],
@@ -4240,7 +4305,7 @@ fn pr_with_commits(number: u64, commit_count: u64) -> PullRequest {
 
 #[tokio::test]
 async fn test_commit_limit_default_blocks_multi_commit_pr_with_action() {
-    let provider = MockHub::new(vec![pr_with_commits(200, 3)]);
+    let provider = FakeForge::new(vec![pr_with_commits(200, 3)]);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--ok-to-test"],
@@ -4260,7 +4325,7 @@ async fn test_commit_limit_default_blocks_multi_commit_pr_with_action() {
 
 #[tokio::test]
 async fn test_commit_limit_flag_raises_threshold() {
-    let provider = MockHub::new(vec![pr_with_commits(201, 3)]);
+    let provider = FakeForge::new(vec![pr_with_commits(201, 3)]);
 
     let result = run_autoprat_test(
         vec![
@@ -4283,7 +4348,7 @@ async fn test_commit_limit_flag_raises_threshold() {
 #[tokio::test]
 async fn test_commit_limit_not_enforced_without_actions() {
     // Safety net only fires when we're emitting commands.
-    let provider = MockHub::new(vec![pr_with_commits(202, 5)]);
+    let provider = FakeForge::new(vec![pr_with_commits(202, 5)]);
 
     let result = run_autoprat_test(vec!["autoprat", "--repo", "owner/repo"], &provider).await;
 
@@ -4300,7 +4365,7 @@ async fn test_commit_limit_only_counts_acted_upon_prs() {
     over.labels = vec!["ok-to-test-already".to_string()]; // no needs-ok-to-test label
     let ok = pr_with_commits(204, 1);
 
-    let provider = MockHub::new(vec![over, ok]);
+    let provider = FakeForge::new(vec![over, ok]);
 
     let result = run_autoprat_test(
         vec!["autoprat", "--repo", "owner/repo", "--ok-to-test"],
@@ -4316,7 +4381,7 @@ async fn test_commit_limit_only_counts_acted_upon_prs() {
 
 #[tokio::test]
 async fn test_commits_filter_exact_match() {
-    let provider = MockHub::new(vec![
+    let provider = FakeForge::new(vec![
         pr_with_commits(300, 1),
         pr_with_commits(301, 2),
         pr_with_commits(302, 5),
@@ -4335,7 +4400,7 @@ async fn test_commits_filter_exact_match() {
 
 #[tokio::test]
 async fn test_commits_filter_gt() {
-    let provider = MockHub::new(vec![
+    let provider = FakeForge::new(vec![
         pr_with_commits(310, 1),
         pr_with_commits(311, 2),
         pr_with_commits(312, 5),
@@ -4355,7 +4420,7 @@ async fn test_commits_filter_gt() {
 
 #[tokio::test]
 async fn test_commits_filter_le() {
-    let provider = MockHub::new(vec![
+    let provider = FakeForge::new(vec![
         pr_with_commits(320, 1),
         pr_with_commits(321, 3),
         pr_with_commits(322, 5),
@@ -4375,7 +4440,7 @@ async fn test_commits_filter_le() {
 
 #[tokio::test]
 async fn test_commits_filter_ne() {
-    let provider = MockHub::new(vec![
+    let provider = FakeForge::new(vec![
         pr_with_commits(330, 1),
         pr_with_commits(331, 2),
         pr_with_commits(332, 1),
