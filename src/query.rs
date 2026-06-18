@@ -82,7 +82,7 @@ mod tests {
         filters::AuthorPost,
         search::RepoSearch,
         types::{
-            ActionPolicy, CommentAction, FetchCriteria, PrAction, Repo, SearchCriterion,
+            ActionPolicy, CommentAction, FetchCriteria, PrAction, PrState, Repo, SearchCriterion,
             SelectionPolicy,
         },
     };
@@ -130,6 +130,7 @@ mod tests {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![],
             recent_comments: vec![],
         }

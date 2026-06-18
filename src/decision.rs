@@ -199,7 +199,7 @@ mod tests {
     use crate::{
         filters::AuthorPost,
         pr_selector::PrIdentifier,
-        types::{CommentInfo, PullRequest, Repo, SearchCriterion},
+        types::{CommentInfo, PrState, PullRequest, Repo, SearchCriterion},
     };
 
     fn pr_with_comments(recent_comments: Vec<CommentInfo>) -> PullRequest {
@@ -215,6 +215,7 @@ mod tests {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![],
             recent_comments,
         }

@@ -50,7 +50,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::types::PullRequest;
+    use crate::types::{PrState, PullRequest};
 
     fn repo() -> Repo {
         Repo::new("owner", "repo").unwrap()
@@ -69,6 +69,7 @@ mod tests {
             base_branch: base_branch.to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![],
             recent_comments: vec![],
         }

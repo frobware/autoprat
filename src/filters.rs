@@ -195,7 +195,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::types::{PullRequest, Repo};
+    use crate::types::{PrState, PullRequest, Repo};
 
     fn pr(labels: &[&str], base_branch: &str, commit_count: u64) -> PullRequest {
         PullRequest {
@@ -210,6 +210,7 @@ mod tests {
             base_branch: base_branch.to_string(),
             commit_count,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![],
             recent_comments: vec![],
         }
