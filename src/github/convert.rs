@@ -13,12 +13,12 @@ use anyhow::Result;
 use octocrab::models::{StatusState, workflows::Conclusion};
 
 use super::graphql::{
-    GraphQLCheckRunStatus, GraphQLCommentConnection, GraphQLPullRequest, GraphQLStatusCheckRollup,
-    GraphQLStatusContext,
+    GraphQLCheckRunStatus, GraphQLCommentConnection, GraphQLPullRequest, GraphQLPullRequestState,
+    GraphQLStatusCheckRollup, GraphQLStatusContext,
 };
 use crate::types::{
     CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, CheckUrl, CommentInfo,
-    PullRequest, Repo,
+    PrState, PullRequest, Repo,
 };
 
 fn convert_conclusion(conclusion: Conclusion) -> CheckConclusion {
@@ -41,6 +41,14 @@ fn convert_status_state(state: StatusState) -> CheckState {
         StatusState::Pending => CheckState::Pending,
         StatusState::Error => CheckState::Error,
         _ => CheckState::Pending,
+    }
+}
+
+fn convert_pull_request_state(state: GraphQLPullRequestState) -> PrState {
+    match state {
+        GraphQLPullRequestState::Open => PrState::Open,
+        GraphQLPullRequestState::Closed => PrState::Closed,
+        GraphQLPullRequestState::Merged => PrState::Merged,
     }
 }
 
@@ -145,6 +153,7 @@ pub(crate) fn convert_graphql_pr_to_pr_info(
             .ok_or_else(|| anyhow::anyhow!("PR {} missing base branch", graphql_pr.number))?,
         commit_count: graphql_pr.commits.total_count,
         is_draft: graphql_pr.is_draft,
+        state: convert_pull_request_state(graphql_pr.state),
         checks,
         recent_comments,
     })
@@ -173,6 +182,7 @@ mod tests {
             number: 123,
             title: "Test PR".to_string(),
             url: Url::parse("https://github.com/owner/repo/pull/123").unwrap(),
+            state: GraphQLPullRequestState::Open,
             is_draft: false,
             created_at: DateTime::from_timestamp(1609459200, 0).unwrap(), // 2021-01-01.
             base_ref_name: Some("main".to_string()),

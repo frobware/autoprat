@@ -404,6 +404,14 @@ pub struct CommentInfo {
     pub created_at: DateTime<Utc>,
 }
 
+/// Lifecycle state of a pull request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrState {
+    Open,
+    Closed,
+    Merged,
+}
+
 /// Complete information about a pull request.
 ///
 /// Contains core PR metadata, CI check results, labels, and recent
@@ -424,6 +432,7 @@ pub struct PullRequest {
     pub base_branch: String,
     pub commit_count: u64,
     pub is_draft: bool,
+    pub state: PrState,
 
     // Associated data.
     pub checks: Vec<CheckInfo>,

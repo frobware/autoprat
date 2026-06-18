@@ -212,12 +212,21 @@ pub(crate) struct PageInfo {
     pub(crate) end_cursor: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum GraphQLPullRequestState {
+    Open,
+    Closed,
+    Merged,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GraphQLPullRequest {
     pub(crate) number: u64,
     pub(crate) title: String,
     pub(crate) url: Url,
+    pub(crate) state: GraphQLPullRequestState,
     pub(crate) is_draft: bool,
     pub(crate) created_at: DateTime<Utc>,
     pub(crate) base_ref_name: Option<String>,

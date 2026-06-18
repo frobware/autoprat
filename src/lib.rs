@@ -23,6 +23,6 @@ pub use query::{fetch_pull_requests, fetch_pull_requests_at};
 pub use types::{
     ActionPolicy, AppRequest, CheckConclusion, CheckInfo, CheckName, CheckNameError,
     CheckRunStatus, CheckState, CheckUrl, CommentAction, CommentInfo, DisplayMode, DisplaySettings,
-    FetchCriteria, Forge, LogUrl, LogUrlError, PostFilter, PrAction, PullRequest, QueryResult,
-    QuerySpec, Repo, RepoError, RepoUrlError, SearchCriterion, SelectionPolicy, Task,
+    FetchCriteria, Forge, LogUrl, LogUrlError, PostFilter, PrAction, PrState, PullRequest,
+    QueryResult, QuerySpec, Repo, RepoError, RepoUrlError, SearchCriterion, SelectionPolicy, Task,
 };

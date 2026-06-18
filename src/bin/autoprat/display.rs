@@ -2,7 +2,8 @@ use std::{collections::HashMap, io::Write, time::Duration};
 
 use anyhow::Result;
 use autoprat::{
-    CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, DisplayMode, PullRequest,
+    CheckConclusion, CheckInfo, CheckName, CheckRunStatus, CheckState, DisplayMode, PrState,
+    PullRequest,
 };
 #[cfg(test)]
 use autoprat::{CheckUrl, Repo};
@@ -555,7 +556,15 @@ impl<'a> PrDetailFormatter<'a> {
         let pr = &self.pr_info;
         writeln!(writer, "├─Title: {} ({})", pr.title, pr.author_login)?;
         writeln!(writer, "├─PR #{}", pr.number)?;
-        writeln!(writer, "├─State: OPEN")?;
+        writeln!(
+            writer,
+            "├─State: {}",
+            match pr.state {
+                PrState::Open => "OPEN",
+                PrState::Closed => "CLOSED",
+                PrState::Merged => "MERGED",
+            }
+        )?;
         writeln!(
             writer,
             "├─Draft: {}",
@@ -895,6 +904,7 @@ mod tests {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("unit-tests").unwrap(),
@@ -1090,6 +1100,32 @@ mod tests {
             Some("1"),
             "draft column should be 1 for a draft PR"
         );
+    }
+
+    #[tokio::test]
+    async fn test_verbose_state_reflects_pull_request_state() {
+        for (state, expected) in [
+            (PrState::Closed, "├─State: CLOSED"),
+            (PrState::Merged, "├─State: MERGED"),
+        ] {
+            let mut prs = create_test_pr_data();
+            prs[0].state = state;
+            let mut output = Vec::new();
+            display_pr_table(
+                &prs,
+                &create_display_mode(false, true, false),
+                false,
+                true,
+                &mut output,
+            )
+            .await
+            .unwrap();
+            let output = String::from_utf8(output).unwrap();
+            assert!(
+                output.contains(expected),
+                "expected {expected:?} in:\n{output}"
+            );
+        }
     }
 
     #[tokio::test]

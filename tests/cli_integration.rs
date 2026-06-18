@@ -2,8 +2,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use autoprat::{
     AppRequest, CheckConclusion, CheckInfo, CheckName, CheckState, CheckUrl, CommentAction,
-    CommentInfo, DisplayMode, Forge, PrAction, PullRequest, QueryResult, Repo, SearchCriterion,
-    fetch_pull_requests, fetch_pull_requests_at, parse_args,
+    CommentInfo, DisplayMode, Forge, PrAction, PrState, PullRequest, QueryResult, Repo,
+    SearchCriterion, fetch_pull_requests, fetch_pull_requests_at, parse_args,
     search::{FetchPlan, RepoSearch},
 };
 use chrono::{TimeZone, Utc};
@@ -115,6 +115,7 @@ fn behavioural_pr(number: u64, title: &str, recent_comments: Vec<CommentInfo>) -
         base_branch: "main".to_string(),
         commit_count: 1,
         is_draft: false,
+        state: PrState::Open,
         checks: vec![],
         recent_comments,
     }
@@ -231,6 +232,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -253,6 +255,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -284,6 +287,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -315,6 +319,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/lint").unwrap(),
                 conclusion: Some(CheckConclusion::Failure),
@@ -337,6 +342,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -375,6 +381,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -401,6 +408,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -432,6 +440,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![], // No checks yet, needs ok-to-test first
             recent_comments: vec![],
         },
@@ -448,6 +457,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -3414,6 +3424,7 @@ async fn test_multi_repository_urls() {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/unit-tests").unwrap(),
                 conclusion: None,
@@ -3436,6 +3447,7 @@ async fn test_multi_repository_urls() {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/integration-tests").unwrap(),
@@ -3533,6 +3545,7 @@ async fn test_multi_repository_urls_with_filters() {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3549,6 +3562,7 @@ async fn test_multi_repository_urls_with_filters() {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3565,6 +3579,7 @@ async fn test_multi_repository_urls_with_filters() {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3628,6 +3643,7 @@ async fn test_multi_repository_urls_with_actions() {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3644,6 +3660,7 @@ async fn test_multi_repository_urls_with_actions() {
             base_branch: "main".to_string(),
             commit_count: 1,
             is_draft: false,
+            state: PrState::Open,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -4316,6 +4333,7 @@ fn pr_with_commits(number: u64, commit_count: u64) -> PullRequest {
         base_branch: "main".to_string(),
         commit_count,
         is_draft: false,
+        state: PrState::Open,
         checks: vec![],
         recent_comments: vec![],
     }
