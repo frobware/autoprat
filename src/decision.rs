@@ -140,7 +140,10 @@ pub fn plan_executable_action(
 
             PrAction::comments(executable_actions)
         }
-        PrAction::Close | PrAction::Merge => Some(action.clone()),
+        PrAction::Close => Some(action.clone()),
+        // A draft cannot be merged; GitHub rejects it, so never plan
+        // the action in the first place.
+        PrAction::Merge => (!pr.is_draft).then(|| action.clone()),
     }
 }
 
@@ -293,6 +296,40 @@ mod tests {
             Some(PrAction::comment(CommentAction::Custom(
                 "Please review".to_string()
             )))
+        );
+    }
+
+    #[test]
+    fn merge_is_rejected_for_a_draft_pull_request() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
+
+        let mut draft = pr_with_comments(vec![]);
+        draft.is_draft = true;
+        assert_eq!(
+            plan_executable_action(
+                &PrAction::Merge,
+                &draft,
+                10,
+                Duration::from_secs(3600),
+                None,
+                now
+            ),
+            None,
+            "a draft must not produce a merge action"
+        );
+
+        let ready = pr_with_comments(vec![]);
+        assert_eq!(
+            plan_executable_action(
+                &PrAction::Merge,
+                &ready,
+                10,
+                Duration::from_secs(3600),
+                None,
+                now
+            ),
+            Some(PrAction::Merge),
+            "a ready PR still merges"
         );
     }
 
