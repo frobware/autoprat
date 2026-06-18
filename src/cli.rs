@@ -97,7 +97,8 @@ struct FilterArgs {
 
 #[derive(Parser, Default, Debug)]
 #[command(
-    about = "Find and filter GitHub PRs, then optionally generate bulk action commands (approve, LGTM, retest, close, etc.)"
+    about = "Find and filter GitHub PRs, then optionally generate bulk action commands (approve, LGTM, retest, close, etc.)",
+    max_term_width = 80
 )]
 #[command(long_version = BUILD_INFO_HUMAN)]
 struct CliArgs {
