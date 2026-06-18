@@ -257,11 +257,12 @@ fn display_prs_tsv<W: Write>(prs: &[PullRequest], writer: &mut W) -> Result<()> 
             "0"
         };
         let hold = if pr.has_label(LABEL_HOLD) { "1" } else { "0" };
+        let draft = if pr.is_draft { "1" } else { "0" };
         let created = pr.created_at.to_rfc3339_opts(SecondsFormat::Secs, true);
 
         writeln!(
             writer,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             pr.url,
             pr.base_branch,
             ci_str,
@@ -269,6 +270,7 @@ fn display_prs_tsv<W: Write>(prs: &[PullRequest], writer: &mut W) -> Result<()> 
             lgtm,
             ok2test,
             hold,
+            draft,
             pr.commit_count,
             pr.author_simple_name,
             created,
@@ -294,6 +296,7 @@ const TABLE_HEADERS: &[&str] = &[
     "LGTM",
     "OK2TST",
     "HOLD",
+    "DRAFT",
     "COMMITS",
     "AUTHOR",
     "CREATED AT",
@@ -376,6 +379,7 @@ fn pr_to_table_row(pr: &PullRequest) -> Vec<String> {
         "✗"
     };
     let hold = if pr.has_label(LABEL_HOLD) { "Y" } else { "N" };
+    let draft = if pr.is_draft { "Y" } else { "N" };
 
     vec![
         pr.url.clone(),
@@ -385,6 +389,7 @@ fn pr_to_table_row(pr: &PullRequest) -> Vec<String> {
         lgtm.to_string(),
         ok2test.to_string(),
         hold.to_string(),
+        draft.to_string(),
         pr.commit_count.to_string(),
         pr.author_simple_name.clone(),
         format_relative_time(pr.created_at),
@@ -551,6 +556,11 @@ impl<'a> PrDetailFormatter<'a> {
         writeln!(writer, "├─Title: {} ({})", pr.title, pr.author_login)?;
         writeln!(writer, "├─PR #{}", pr.number)?;
         writeln!(writer, "├─State: OPEN")?;
+        writeln!(
+            writer,
+            "├─Draft: {}",
+            if pr.is_draft { "Yes" } else { "No" }
+        )?;
         writeln!(writer, "├─Branch: {}", pr.base_branch)?;
         writeln!(
             writer,
@@ -884,6 +894,7 @@ mod tests {
             created_at: base_time - chrono::Duration::hours(5),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("unit-tests").unwrap(),
@@ -944,6 +955,7 @@ mod tests {
         assert!(result.contains("LGTM"));
         assert!(result.contains("OK2TST"));
         assert!(result.contains("HOLD"));
+        assert!(result.contains("DRAFT"));
         assert!(result.contains("AUTHOR"));
         assert!(result.contains("CREATED"));
         assert!(result.contains("TITLE"));
@@ -973,6 +985,7 @@ mod tests {
         assert!(result.contains("├─Title: Add authentication system (alice)"));
         assert!(result.contains("├─PR #101"));
         assert!(result.contains("├─State: OPEN"));
+        assert!(result.contains("├─Draft: No"));
         assert!(result.contains("├─Created:"));
         assert!(result.contains("├─Status"));
         assert!(result.contains("│ ├─Approved: Yes"));
@@ -1032,11 +1045,50 @@ mod tests {
                 "0\t",
                 "0\t",
                 "0\t",
+                "0\t",
                 "1\t",
                 "alice\t",
                 "2024-01-15T05:00:00Z\t",
                 "Add authentication system\n",
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_display_reports_draft_status() {
+        let mut prs = create_test_pr_data();
+        prs[0].is_draft = true;
+
+        // The verbose detail view names the draft state explicitly.
+        let mut verbose = Vec::new();
+        display_pr_table(
+            &prs,
+            &create_display_mode(false, true, false),
+            false,
+            true,
+            &mut verbose,
+        )
+        .await
+        .unwrap();
+        let verbose = String::from_utf8(verbose).unwrap();
+        assert!(verbose.contains("├─Draft: Yes"));
+
+        // The machine-readable row carries the draft column as 1.
+        let mut tsv = Vec::new();
+        display_pr_table(
+            &prs,
+            &create_display_mode(false, false, false),
+            false,
+            false,
+            &mut tsv,
+        )
+        .await
+        .unwrap();
+        let tsv = String::from_utf8(tsv).unwrap();
+        assert_eq!(
+            tsv.trim_end().split('\t').nth(7),
+            Some("1"),
+            "draft column should be 1 for a draft PR"
         );
     }
 

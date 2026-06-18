@@ -144,6 +144,7 @@ pub(crate) fn convert_graphql_pr_to_pr_info(
             .base_ref_name
             .ok_or_else(|| anyhow::anyhow!("PR {} missing base branch", graphql_pr.number))?,
         commit_count: graphql_pr.commits.total_count,
+        is_draft: graphql_pr.is_draft,
         checks,
         recent_comments,
     })
@@ -172,6 +173,7 @@ mod tests {
             number: 123,
             title: "Test PR".to_string(),
             url: Url::parse("https://github.com/owner/repo/pull/123").unwrap(),
+            is_draft: false,
             created_at: DateTime::from_timestamp(1609459200, 0).unwrap(), // 2021-01-01.
             base_ref_name: Some("main".to_string()),
             commits: GraphQLCommitConnection { total_count: 1 },

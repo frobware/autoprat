@@ -114,6 +114,7 @@ fn behavioural_pr(number: u64, title: &str, recent_comments: Vec<CommentInfo>) -
         created_at: Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap(),
         base_branch: "main".to_string(),
         commit_count: 1,
+        is_draft: false,
         checks: vec![],
         recent_comments,
     }
@@ -229,6 +230,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -250,6 +252,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -280,6 +283,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -310,6 +314,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/lint").unwrap(),
                 conclusion: Some(CheckConclusion::Failure),
@@ -331,6 +336,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -368,6 +374,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -393,6 +400,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/build").unwrap(),
@@ -423,6 +431,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![], // No checks yet, needs ok-to-test first
             recent_comments: vec![],
         },
@@ -438,6 +447,7 @@ fn create_mock_github_data() -> Vec<PullRequest> {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/build").unwrap(),
                 conclusion: Some(CheckConclusion::Success),
@@ -3403,6 +3413,7 @@ async fn test_multi_repository_urls() {
             created_at: Utc::now() - chrono::Duration::weeks(3),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![CheckInfo {
                 name: CheckName::new("ci/unit-tests").unwrap(),
                 conclusion: None,
@@ -3424,6 +3435,7 @@ async fn test_multi_repository_urls() {
             created_at: Utc::now() - chrono::Duration::weeks(3),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![
                 CheckInfo {
                     name: CheckName::new("ci/integration-tests").unwrap(),
@@ -3520,6 +3532,7 @@ async fn test_multi_repository_urls_with_filters() {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3535,6 +3548,7 @@ async fn test_multi_repository_urls_with_filters() {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3550,6 +3564,7 @@ async fn test_multi_repository_urls_with_filters() {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3612,6 +3627,7 @@ async fn test_multi_repository_urls_with_actions() {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -3627,6 +3643,7 @@ async fn test_multi_repository_urls_with_actions() {
             created_at: Utc::now(),
             base_branch: "main".to_string(),
             commit_count: 1,
+            is_draft: false,
             checks: vec![],
             recent_comments: vec![],
         },
@@ -4298,6 +4315,7 @@ fn pr_with_commits(number: u64, commit_count: u64) -> PullRequest {
         created_at: Utc::now(),
         base_branch: "main".to_string(),
         commit_count,
+        is_draft: false,
         checks: vec![],
         recent_comments: vec![],
     }
