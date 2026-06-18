@@ -19,62 +19,72 @@ const BUILD_INFO_HUMAN: &str = env!("BUILD_INFO_HUMAN");
 
 #[derive(Args, Debug, Clone, Default)]
 struct ActionArgs {
-    /// Post /approve comments
+    /// Emit an `/approve` comment command for each selected PR.
+    ///
+    /// Actions are not run for you: each one prints a `gh` command on
+    /// stdout, so you can review the batch and pipe it to a shell.
     #[arg(long, help_heading = "Actions")]
     pub approve: bool,
 
-    /// Post /lgtm comments
+    /// Emit a `/lgtm` comment command for each selected PR.
     #[arg(long, help_heading = "Actions")]
     pub lgtm: bool,
 
-    /// Post /ok-to-test comments
+    /// Emit an `/ok-to-test` comment command for each selected PR.
     #[arg(long = "ok-to-test", help_heading = "Actions")]
     pub ok_to_test: bool,
 
-    /// Post /retest comments
+    /// Emit a `/retest` comment command for each selected PR.
     #[arg(long, help_heading = "Actions")]
     pub retest: bool,
 
-    /// Close PRs
+    /// Emit a `gh pr close` command for each selected PR.
     #[arg(long, help_heading = "Actions")]
     pub close: bool,
 
-    /// Merge PRs
+    /// Emit a `gh pr merge` command for each selected PR.
+    ///
+    /// Draft PRs are skipped, since GitHub will not merge a draft.
     #[arg(long, help_heading = "Actions")]
     pub merge: bool,
 
-    /// Post /hold comments
+    /// Emit a `/hold` comment command for each selected PR.
     #[arg(long, help_heading = "Actions")]
     pub hold: bool,
 }
 
 #[derive(Args, Debug, Clone, Default)]
 struct FilterArgs {
-    /// Missing 'approved' label
+    /// Keep only PRs missing the `approved` label.
     #[arg(long = "needs-approve", help_heading = "Filters")]
     pub needs_approve: bool,
 
-    /// Missing 'lgtm' label
+    /// Keep only PRs missing the `lgtm` label.
     #[arg(long = "needs-lgtm", help_heading = "Filters")]
     pub needs_lgtm: bool,
 
-    /// Has 'needs-ok-to-test' label
+    /// Keep only PRs carrying the `needs-ok-to-test` label.
     #[arg(long = "needs-ok-to-test", help_heading = "Filters")]
     pub needs_ok_to_test: bool,
 
-    /// Has failing CI checks
+    /// Keep only PRs with at least one failing CI check.
     #[arg(long = "failing-ci", help_heading = "Filters")]
     pub failing_ci: bool,
 
-    /// Exact author match
+    /// Keep only PRs opened by this user (exact login match).
     #[arg(short = 'a', long, help_heading = "Filters", value_name = "USERNAME")]
     pub author: Option<String>,
 
-    /// Has label (prefix - to negate, can specify multiple)
+    /// Keep only PRs with this label; repeatable.
+    ///
+    /// Prefix a name with `-` to require its absence instead, e.g.
+    /// `--label bug --label -wip`.
     #[arg(long, help_heading = "Filters", value_name = "NAME")]
     pub label: Vec<String>,
 
-    /// Specific CI check is failing (exact match)
+    /// Keep only PRs where the named CI check is failing (exact name).
+    ///
+    /// Repeatable; a PR matches only when every named check is failing.
     #[arg(
         long = "failing-check",
         help_heading = "Filters",
@@ -82,15 +92,19 @@ struct FilterArgs {
     )]
     pub failing_check: Vec<String>,
 
-    /// Filter by PR title (regex match)
+    /// Keep only PRs whose title matches this regular expression.
     #[arg(short = 't', long, help_heading = "Filters", value_name = "REGEX")]
     pub title: Option<String>,
 
-    /// Filter by base/target branch (exact match)
+    /// Keep only PRs targeting this base branch (exact match).
     #[arg(long, help_heading = "Filters", value_name = "BRANCH")]
     pub base: Option<String>,
 
-    /// Filter by commit count: bare number (exact), or prefix with =, !=, >, >=, <, <= (e.g. '>1', '<=3')
+    /// Keep only PRs whose commit count matches this expression.
+    ///
+    /// A bare number matches exactly; prefix with `=`, `!=`, `>`, `>=`,
+    /// `<`, or `<=` to compare, e.g. `--commits '>1'` or
+    /// `--commits '<=3'`.
     #[arg(long, help_heading = "Filters", value_name = "EXPR")]
     pub commits: Option<String>,
 }
@@ -102,14 +116,23 @@ struct FilterArgs {
 )]
 #[command(long_version = BUILD_INFO_HUMAN)]
 struct CliArgs {
-    /// GitHub repository in format 'owner/repo' (can specify multiple)
+    /// GitHub repository to search, as `owner/repo`.
+    ///
+    /// Repeat the flag to search several repositories in one run.
     #[arg(short = 'r', long = "repo", value_name = "OWNER/REPO")]
     pub repo: Vec<String>,
 
-    /// PR-NUMBER|PR-RANGE|PR-URL ... (a range is inclusive, e.g. 123-127)
+    /// Pull requests to act on: a number, an inclusive range, or a URL.
+    ///
+    /// Numbers and ranges like `123` or `123-127` need `--repo` to name
+    /// the repository; full PR URLs carry their own, so they can be
+    /// mixed across repositories.
     pub prs: Vec<String>,
 
-    /// Exclude specific PRs from processing (can specify multiple or comma-separated)
+    /// Drop these PRs from the selection.
+    ///
+    /// Takes the same number, range, or URL forms as the positional
+    /// arguments, repeated or comma-separated, e.g. `-E 124,130-132`.
     #[arg(
         short = 'E',
         long = "exclude",
@@ -118,7 +141,12 @@ struct CliArgs {
     )]
     pub exclude: Vec<String>,
 
-    /// Raw GitHub search query (mutually exclusive with filter options)
+    /// Raw GitHub search query, used in place of the filter flags.
+    ///
+    /// Cannot be combined with `--repo` or the filter options, so name
+    /// the repository in the query itself (`repo:owner/name`). `is:pr`
+    /// and `is:open` are added unless you supply them; pass `is:closed`
+    /// to include closed and merged PRs.
     #[arg(long, value_name = "SEARCH-QUERY")]
     pub query: Option<String>,
 
@@ -128,11 +156,17 @@ struct CliArgs {
     #[command(flatten)]
     pub filters: FilterArgs,
 
-    /// Post custom comment commands (can specify multiple)
+    /// Post a custom comment on each selected PR; repeatable.
+    ///
+    /// The text is emitted as a `gh pr comment` command and is subject
+    /// to the same throttling and history checks as the action flags.
     #[arg(short = 'c', long, value_name = "TEXT")]
     pub comment: Vec<String>,
 
-    /// Skip if same comment posted recently (e.g. 5, 30s, 5m, 2h; unitless implies minutes)
+    /// Skip a comment when the same one was posted within this window.
+    ///
+    /// Accepts a duration such as `30s`, `5m`, or `2h`; a bare number
+    /// is read as minutes. Affects comment actions only.
     #[arg(long, value_name = "DURATION")]
     pub throttle: Option<String>,
 
@@ -144,11 +178,15 @@ struct CliArgs {
     #[arg(long, value_name = "NUM", hide = true)]
     pub history_max_comments: Option<usize>,
 
-    /// Show detailed PR information
+    /// Show each PR in detail instead of the one-line table.
+    ///
+    /// Expands the state, labels, and per-check CI results beneath
+    /// every selected PR.
     #[arg(short = 'd', long)]
     pub detailed: bool,
 
-    /// Show detailed PR information with error logs from failing checks
+    /// Like `--detailed`, but also include error logs from failing
+    /// checks.
     #[arg(short = 'D', long = "detailed-with-logs")]
     pub detailed_with_logs: bool,
 
@@ -164,7 +202,11 @@ struct CliArgs {
     #[arg(short = 'S', long = "chop-long-lines")]
     pub chop_long_lines: bool,
 
-    /// Safety guard: abort with an error (no commands emitted) when any PR targeted by an action has more than this many commits
+    /// Refuse to act when a target PR has more than this many commits.
+    ///
+    /// A guard against runaway bulk actions: if any PR an action would
+    /// touch has more commits than this, autoprat emits no commands at
+    /// all. Raise it to allow multi-commit PRs.
     #[arg(long = "commit-limit", default_value = "1", value_name = "NUM")]
     pub commit_limit: u64,
 }
