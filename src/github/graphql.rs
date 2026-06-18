@@ -218,6 +218,7 @@ pub(crate) struct GraphQLPullRequest {
     pub(crate) number: u64,
     pub(crate) title: String,
     pub(crate) url: Url,
+    pub(crate) is_draft: bool,
     pub(crate) created_at: DateTime<Utc>,
     pub(crate) base_ref_name: Option<String>,
     pub(crate) commits: GraphQLCommitConnection,

@@ -423,6 +423,7 @@ pub struct PullRequest {
     pub created_at: DateTime<Utc>,
     pub base_branch: String,
     pub commit_count: u64,
+    pub is_draft: bool,
 
     // Associated data.
     pub checks: Vec<CheckInfo>,

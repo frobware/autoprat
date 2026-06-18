@@ -209,6 +209,7 @@ mod tests {
             created_at: Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap(),
             base_branch: base_branch.to_string(),
             commit_count,
+            is_draft: false,
             checks: vec![],
             recent_comments: vec![],
         }
