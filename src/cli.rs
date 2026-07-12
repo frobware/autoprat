@@ -20,9 +20,6 @@ const BUILD_INFO_HUMAN: &str = env!("BUILD_INFO_HUMAN");
 #[derive(Args, Debug, Clone, Default)]
 struct ActionArgs {
     /// Emit an `/approve` comment command for each selected PR.
-    ///
-    /// Actions are not run for you: each one prints a `gh` command on
-    /// stdout, so you can review the batch and pipe it to a shell.
     #[arg(long, help_heading = "Actions")]
     pub approve: bool,
 
@@ -112,6 +109,7 @@ struct FilterArgs {
 #[derive(Parser, Default, Debug)]
 #[command(
     about = "Find and filter GitHub PRs, then optionally generate bulk action commands (approve, LGTM, retest, close, etc.)",
+    long_about = "Find and filter GitHub PRs, then optionally generate bulk action commands (approve, LGTM, retest, close, etc.).\n\nActions are not run for you: each action flag prints a `gh` command on stdout, so you can review the batch and pipe it to a shell.",
     max_term_width = 80
 )]
 #[command(long_version = BUILD_INFO_HUMAN)]
