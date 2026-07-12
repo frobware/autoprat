@@ -20,6 +20,9 @@ const BUILD_INFO_HUMAN: &str = env!("BUILD_INFO_HUMAN");
 const THROTTLE_FORMAT_HELP: &str =
     "a duration such as `30s`, `5m`, or `2h`; a bare number is read as minutes";
 
+const DEFAULT_HISTORY_MAX_AGE: Duration = Duration::from_secs(60 * 60);
+const DEFAULT_HISTORY_MAX_COMMENTS: usize = 10;
+
 #[derive(Args, Debug, Clone, Default)]
 struct ActionArgs {
     /// Emit an `/approve` comment command for each selected PR.
@@ -174,11 +177,13 @@ struct CliArgs {
     )]
     pub throttle: Option<String>,
 
-    /// Maximum age for history check (e.g. 30m, 1h, 2h; default: 1h)
+    /// Maximum age for history check (e.g. 30m, 1h, 2h); defaults to
+    /// `DEFAULT_HISTORY_MAX_AGE`.
     #[arg(long, value_name = "DURATION", hide = true)]
     pub history_max_age: Option<String>,
 
-    /// Maximum number of recent comments to check in history (default: 10)
+    /// Maximum number of recent comments to check in history; defaults
+    /// to `DEFAULT_HISTORY_MAX_COMMENTS`.
     #[arg(long, value_name = "NUM", hide = true)]
     pub history_max_comments: Option<usize>,
 
@@ -464,9 +469,11 @@ fn create_autoprat_request(cli: CliArgs) -> Result<QuerySpec> {
         .filter(|t| !t.trim().is_empty())
         .map(|t| parse_throttle_duration(t))
         .transpose()?
-        .unwrap_or(Duration::from_secs(60 * 60)); // Default: 1 hour
+        .unwrap_or(DEFAULT_HISTORY_MAX_AGE);
 
-    let history_max_comments = cli.history_max_comments.unwrap_or(10); // Default: 10
+    let history_max_comments = cli
+        .history_max_comments
+        .unwrap_or(DEFAULT_HISTORY_MAX_COMMENTS);
 
     Ok(QuerySpec {
         fetch: FetchCriteria {
