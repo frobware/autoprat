@@ -145,12 +145,14 @@ struct CliArgs {
     )]
     pub exclude: Vec<String>,
 
-    /// Raw GitHub search query, used in place of the filter flags.
+    /// Raw GitHub search query, used in place of `--repo`.
     ///
-    /// Cannot be combined with `--repo` or the filter options, so name
-    /// the repository in the query itself (`repo:owner/name`). `is:pr`
-    /// and `is:open` are added unless you supply them; pass `is:closed`
-    /// to include closed and merged PRs.
+    /// Cannot be combined with `--repo`, positional PR numbers, or the
+    /// label filters (`--label`, `--needs-approve`, `--needs-lgtm`,
+    /// `--needs-ok-to-test`); express those as query terms instead,
+    /// e.g. `repo:owner/name label:bug`. The other filter options
+    /// apply as normal. `is:pr` and `is:open` are added unless you
+    /// supply them; pass `is:closed` to include closed and merged PRs.
     #[arg(long, value_name = "SEARCH-QUERY")]
     pub query: Option<String>,
 
@@ -232,6 +234,15 @@ impl CliArgs {
             }
             if !self.prs.is_empty() {
                 anyhow::bail!("Cannot use --prs with --query (these are different modes)");
+            }
+            if self.filters.needs_approve
+                || self.filters.needs_lgtm
+                || self.filters.needs_ok_to_test
+                || !self.filters.label.is_empty()
+            {
+                anyhow::bail!(
+                    "Cannot use label filters (--label, --needs-approve, --needs-lgtm, --needs-ok-to-test) with --query (put label terms in the query instead)"
+                );
             }
         }
 
@@ -559,6 +570,30 @@ mod tests {
         assert!(help.contains("--exclude"));
         assert!(!help.contains("--history-max-age"));
         assert!(!help.contains("--history-max-comments"));
+    }
+
+    #[test]
+    fn parse_args_rejects_label_filters_with_query() {
+        for args in [
+            vec!["autoprat", "--query", "repo:o/r", "--label", "bug"],
+            vec!["autoprat", "--query", "repo:o/r", "--needs-approve"],
+            vec!["autoprat", "--query", "repo:o/r", "--needs-lgtm"],
+            vec!["autoprat", "--query", "repo:o/r", "--needs-ok-to-test"],
+        ] {
+            let err =
+                parse_args(args.clone()).expect_err(&format!("expected {args:?} to be rejected"));
+            let rendered = format!("{err:#}");
+            assert!(
+                rendered.contains("--query"),
+                "error should mention --query, got: {rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_args_allows_post_filters_with_query() {
+        parse_args(["autoprat", "--query", "repo:o/r", "--author", "alice"])
+            .expect("post filters should combine with --query");
     }
 
     #[test]
