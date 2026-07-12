@@ -17,6 +17,9 @@ use crate::{
 
 const BUILD_INFO_HUMAN: &str = env!("BUILD_INFO_HUMAN");
 
+const THROTTLE_FORMAT_HELP: &str =
+    "a duration such as `30s`, `5m`, or `2h`; a bare number is read as minutes";
+
 #[derive(Args, Debug, Clone, Default)]
 struct ActionArgs {
     /// Emit an `/approve` comment command for each selected PR.
@@ -162,10 +165,13 @@ struct CliArgs {
     pub comment: Vec<String>,
 
     /// Skip a comment when the same one was posted within this window.
-    ///
-    /// Accepts a duration such as `30s`, `5m`, or `2h`; a bare number
-    /// is read as minutes. Affects comment actions only.
-    #[arg(long, value_name = "DURATION")]
+    #[arg(
+        long,
+        value_name = "DURATION",
+        long_help = format!(
+            "Skip a comment when the same one was posted within this window.\n\nAccepts {THROTTLE_FORMAT_HELP}. Affects comment actions only."
+        )
+    )]
     pub throttle: Option<String>,
 
     /// Maximum age for history check (e.g. 30m, 1h, 2h; default: 1h)
@@ -379,10 +385,7 @@ fn parse_throttle_duration(throttle_str: &str) -> Result<Duration> {
         return Ok(Duration::from_secs(hours * 3600));
     }
 
-    anyhow::bail!(
-        "Invalid throttle format '{}'. Supported formats: unitless number (minutes), '30s', '5m', '2h'",
-        throttle_str
-    )
+    anyhow::bail!("Invalid throttle format '{throttle_str}'. Accepts {THROTTLE_FORMAT_HELP}.")
 }
 
 fn validate_pr_urls_against_repo(repos: &[String], prs: &[String]) -> Result<()> {
