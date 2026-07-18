@@ -1,4 +1,4 @@
-.PHONY: fmt-check fmt-fix build test clean clippy coverage coverage-html coverage-open coverage-ci install-coverage-tools
+.PHONY: fmt-check fmt-fix build test clean clippy coverage coverage-html coverage-open coverage-ci install-coverage-tools mutants install-mutants-tools
 
 # Inside the nix devshell, nightly rustfmt is already first on PATH
 # and there is no rustup wrapper to handle `+nightly`. Drop the
@@ -53,3 +53,17 @@ coverage-open: coverage-html
 
 coverage-ci: install-coverage-tools
 	cargo llvm-cov --lcov --output-path lcov.info
+
+# Mutation testing tools
+install-mutants-tools:
+	@echo "Checking for cargo-mutants..."
+	@cargo mutants --version > /dev/null 2>&1 || \
+		(echo "Installing cargo-mutants..." && cargo install cargo-mutants)
+
+# Mutation testing. Each mutant is built and tested in its own copy of
+# the tree, so parallel jobs pay off; half the cores is the
+# cargo-mutants recommendation. Override with MUTANTS_JOBS=n.
+MUTANTS_JOBS ?= $(shell j=$$(( $$(nproc) / 2 )); [ $$j -lt 1 ] && j=1; echo $$j)
+
+mutants: install-mutants-tools
+	cargo mutants --jobs $(MUTANTS_JOBS)
