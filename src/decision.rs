@@ -458,4 +458,100 @@ mod tests {
             }]
         );
     }
+
+    #[test]
+    fn explicit_selector_requires_both_repo_and_number_to_match() {
+        let pr = pr_with_comments(vec![]);
+        let selection = SelectionPolicy {
+            exclude: vec![],
+            post_filters: vec![],
+        };
+        let fetch_for = |repo: Repo, number: u64| FetchCriteria {
+            repos: vec![],
+            prs: vec![PrIdentifier { repo, number }],
+            query: None,
+            limit: 100,
+            search_criteria: vec![],
+        };
+
+        // Exact repo and number: the PR is in the explicit set.
+        assert!(pull_request_matches(
+            &pr,
+            &fetch_for(pr.repo.clone(), pr.number),
+            &selection
+        ));
+
+        // Same repo but a different number must not match; a selector
+        // identifies one PR, not a whole repo.
+        assert!(!pull_request_matches(
+            &pr,
+            &fetch_for(pr.repo.clone(), pr.number + 1),
+            &selection
+        ));
+
+        // Same number in a different repo must not match either.
+        assert!(!pull_request_matches(
+            &pr,
+            &fetch_for(Repo::new("owner", "other").unwrap(), pr.number),
+            &selection
+        ));
+    }
+
+    #[test]
+    fn comment_is_not_recent_when_posted_exactly_at_the_throttle_cutoff() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
+        let throttle = Duration::from_secs(300);
+        let cutoff = now - chrono::Duration::seconds(300);
+
+        // Strict `>` means a comment posted exactly at the cutoff is no
+        // longer recent, so the throttle does not suppress it.
+        let at_cutoff = pr_with_comments(vec![CommentInfo {
+            body: "/lgtm".to_string(),
+            created_at: cutoff,
+        }]);
+        assert!(!was_comment_posted_recently(
+            &at_cutoff, "/lgtm", throttle, now
+        ));
+
+        // One second inside the window is still recent.
+        let just_inside = pr_with_comments(vec![CommentInfo {
+            body: "/lgtm".to_string(),
+            created_at: cutoff + chrono::Duration::seconds(1),
+        }]);
+        assert!(was_comment_posted_recently(
+            &just_inside,
+            "/lgtm",
+            throttle,
+            now
+        ));
+    }
+
+    #[test]
+    fn comment_is_not_in_history_when_posted_exactly_at_the_max_age_cutoff() {
+        let now = Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap();
+        let max_age = Duration::from_secs(3600);
+        let cutoff = now - chrono::Duration::seconds(3600);
+
+        // Same strict-boundary rule for the history-dedup path: exactly
+        // at the age cutoff counts as out of history.
+        let at_cutoff = pr_with_comments(vec![CommentInfo {
+            body: "/lgtm".to_string(),
+            created_at: cutoff,
+        }]);
+        assert!(!was_comment_posted_in_history(
+            &at_cutoff, "/lgtm", 10, max_age, now
+        ));
+
+        let just_inside = pr_with_comments(vec![CommentInfo {
+            body: "/lgtm".to_string(),
+            created_at: cutoff + chrono::Duration::seconds(1),
+        }]);
+        assert!(was_comment_posted_in_history(
+            &just_inside,
+            "/lgtm",
+            10,
+            max_age,
+            now
+        ));
+    }
 }
