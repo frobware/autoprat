@@ -225,4 +225,39 @@ mod tests {
         assert!(filter.matches(&pr(&[], "main", 2)));
         assert!(!filter.matches(&pr(&[], "main", 1)));
     }
+
+    #[test]
+    fn commit_expr_matches_pins_every_operator_at_its_boundary() {
+        // Around the value 3, exercise below/at/above for each operator
+        // so no comparison-operator mutant in `matches` survives.
+        let cases: &[(&str, u64, bool)] = &[
+            ("=3", 2, false),
+            ("=3", 3, true),
+            ("=3", 4, false),
+            ("!=3", 2, true),
+            ("!=3", 3, false),
+            ("!=3", 4, true),
+            ("<3", 2, true),
+            ("<3", 3, false),
+            ("<3", 4, false),
+            ("<=3", 2, true),
+            ("<=3", 3, true),
+            ("<=3", 4, false),
+            (">3", 2, false),
+            (">3", 3, false),
+            (">3", 4, true),
+            (">=3", 2, false),
+            (">=3", 3, true),
+            (">=3", 4, true),
+        ];
+
+        for (expr, n, expected) in cases {
+            let parsed = CommitExpr::parse(expr).unwrap();
+            assert_eq!(
+                parsed.matches(*n),
+                *expected,
+                "expr {expr:?} against {n} commits should be {expected}"
+            );
+        }
+    }
 }
