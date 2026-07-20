@@ -644,7 +644,45 @@ pub struct QueryResult {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeZone, Utc};
+
     use super::*;
+
+    fn pr_with_authors(author_login: &str, author_simple_name: &str) -> PullRequest {
+        PullRequest {
+            repo: Repo::new("owner", "repo").unwrap(),
+            number: 123,
+            title: "Test PR".to_string(),
+            author_login: author_login.to_string(),
+            author_simple_name: author_simple_name.to_string(),
+            url: "https://github.com/owner/repo/pull/123".to_string(),
+            labels: vec![],
+            created_at: Utc.with_ymd_and_hms(2026, 5, 29, 12, 0, 0).unwrap(),
+            base_branch: "main".to_string(),
+            commit_count: 1,
+            is_draft: false,
+            state: PrState::Open,
+            checks: vec![],
+            recent_comments: vec![],
+        }
+    }
+
+    #[test]
+    fn matches_author_isolates_login_simple_name_and_bot_forms() {
+        // Login matches while the simple name differs: pins the first
+        // `||` in the alternation.
+        assert!(pr_with_authors("alice", "alice-display").matches_author("alice"));
+
+        // Simple name matches while the login differs: pins the second
+        // `||`.
+        assert!(pr_with_authors("alice-login", "alice").matches_author("alice"));
+
+        // A bot login matches the bare bot name via the bracket branch.
+        assert!(pr_with_authors("dependabot[bot]", "dependabot[bot]").matches_author("dependabot"));
+
+        // None of the three forms match.
+        assert!(!pr_with_authors("alice", "alice-display").matches_author("bob"));
+    }
 
     #[test]
     fn test_parse_url_formats() {
