@@ -751,4 +751,93 @@ mod tests {
             "error should name both bounds, got: {rendered}"
         );
     }
+
+    #[test]
+    fn parse_throttle_duration_scales_each_unit_exactly() {
+        // A bare integer is minutes; every unit multiplier must be exact.
+        assert_eq!(
+            parse_throttle_duration("30").unwrap(),
+            Duration::from_secs(1800)
+        );
+        assert_eq!(
+            parse_throttle_duration("45s").unwrap(),
+            Duration::from_secs(45)
+        );
+        assert_eq!(
+            parse_throttle_duration("2m").unwrap(),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            parse_throttle_duration("3h").unwrap(),
+            Duration::from_secs(10800)
+        );
+    }
+
+    #[test]
+    fn transform_slash_commands_maps_every_alias() {
+        let cases = [
+            ("/approve", "--approve"),
+            ("/lgtm", "--lgtm"),
+            ("/ok-to-test", "--ok-to-test"),
+            ("/retest", "--retest"),
+            ("/close", "--close"),
+            ("/merge", "--merge"),
+            ("/hold", "--hold"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(
+                transform_slash_commands(vec![input.to_string()]),
+                vec![expected.to_string()],
+                "{input} should map to {expected}"
+            );
+        }
+
+        // A non-alias argument passes through untouched.
+        assert_eq!(
+            transform_slash_commands(vec!["--repo".to_string(), "owner/repo".to_string()]),
+            vec!["--repo".to_string(), "owner/repo".to_string()]
+        );
+    }
+
+    #[test]
+    fn multiple_repos_with_a_bare_pr_number_are_rejected() {
+        // The multiple-repo guard must fire for positional PR numbers...
+        assert!(
+            parse_args(["autoprat", "-r", "owner/repo", "-r", "owner/other", "123"]).is_err(),
+            "two repos with a bare PR number must be rejected"
+        );
+        // ...and for excluded PR numbers.
+        assert!(
+            parse_args([
+                "autoprat",
+                "-r",
+                "owner/repo",
+                "-r",
+                "owner/other",
+                "-E",
+                "124"
+            ])
+            .is_err(),
+            "two repos with a bare exclude number must be rejected"
+        );
+
+        // A single repo with the same inputs is accepted, so the
+        // rejection above is attributable to the repo count.
+        parse_args(["autoprat", "-r", "owner/repo", "123"])
+            .expect("one repo with a bare PR number is valid");
+        parse_args(["autoprat", "-r", "owner/repo", "-E", "124"])
+            .expect("one repo with a bare exclude number is valid");
+    }
+
+    #[test]
+    fn quiet_display_mode_takes_precedence_over_detailed_modes() {
+        let settings = determine_display_settings(&CliArgs {
+            quiet: true,
+            detailed: true,
+            detailed_with_logs: true,
+            ..Default::default()
+        });
+
+        assert_eq!(settings.mode, DisplayMode::Quiet);
+    }
 }
